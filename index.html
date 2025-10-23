@@ -162,6 +162,14 @@
         // 1. Initial Authentication & Firestore Setup
         async function setupFirebase() {
             try {
+                // Check if the essential projectId is present
+                if (!firebaseConfig.projectId) {
+                    const configError = "The app configuration is missing the required 'projectId'. Cannot connect to Firestore.";
+                    console.error("FATAL CONFIGURATION ERROR:", configError);
+                    await showCustomModal("Configuration Error", configError);
+                    return; // Stop execution if config is invalid
+                }
+                
                 // Initialize Firebase services
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
