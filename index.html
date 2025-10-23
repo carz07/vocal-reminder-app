@@ -74,10 +74,14 @@
 
         // Global Firebase variables provided by the Canvas environment
         
-        // Define a minimal default config with a placeholder projectId AND an empty apiKey
-        const defaultFirebaseConfig = { projectId: "default-canvas-project-id", apiKey: "" }; 
+        // Define a minimal default config with a non-empty placeholder for projectId and apiKey 
+        // to bypass Firebase SDK initialization validation.
+        const defaultFirebaseConfig = { 
+            projectId: "default-canvas-project-id", 
+            apiKey: "AIza-placeholder-key" // Non-empty key to satisfy SDK validation
+        }; 
         
-        // Merge the provided config with the default, ensuring projectId and apiKey are present
+        // Merge the provided config with the default
         const environmentConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const firebaseConfig = { ...defaultFirebaseConfig, ...environmentConfig };
         
@@ -176,23 +180,15 @@
                 setLogLevel('Debug');
                 console.log("Firebase services initialized.");
 
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                    } else {
-                        // Sign in anonymously if no token is available or initial check is empty
-                        if (initialAuthToken) {
-                            await signInWithCustomToken(auth, initialAuthToken);
-                        } else {
-                            // Fallback to anonymous sign-in
-                            await signInAnonymously(auth);
-                        }
-                    }
-                    // Once auth state is set, we are ready to proceed
+                onAuthStateChanged(auth, (user) => {
+                    // The environment is expected to have already established the authentication 
+                    // session using the __initial_auth_token or by signing in anonymously.
+                    
+                    // Set userId based on current auth state or a random ID if unauthenticated
                     userId = auth.currentUser?.uid || crypto.randomUUID();
                     isAuthReady = true;
                     document.getElementById('user-id-display').textContent = `Your User ID: ${userId}`;
-                    console.log("Authentication complete. User ID:", userId);
+                    console.log("Authentication check complete. User ID:", userId);
                     startReminderListener();
                 });
             } catch (error) {
