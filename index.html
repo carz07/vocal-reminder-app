@@ -74,10 +74,10 @@
 
         // Global Firebase variables provided by the Canvas environment
         
-        // Define a minimal default config with a placeholder projectId
-        const defaultFirebaseConfig = { projectId: "default-canvas-project-id" }; 
+        // Define a minimal default config with a placeholder projectId AND an empty apiKey
+        const defaultFirebaseConfig = { projectId: "default-canvas-project-id", apiKey: "" }; 
         
-        // Merge the provided config with the default, ensuring projectId is present
+        // Merge the provided config with the default, ensuring projectId and apiKey are present
         const environmentConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const firebaseConfig = { ...defaultFirebaseConfig, ...environmentConfig };
         
@@ -197,7 +197,8 @@
                 });
             } catch (error) {
                 console.error("Error initializing Firebase or signing in:", error);
-                await showCustomModal("Error Initializing App", `A core configuration error persists. Please try refreshing. (Error: ${error.message})`);
+                // Updated modal message to be slightly less opaque
+                await showCustomModal("Error Initializing App", `A core configuration error persists. Please check the console for details. (Error: ${error.message})`);
             }
         }
         
