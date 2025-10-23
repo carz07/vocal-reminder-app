@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vocal Reminder App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background-color: #f7f9fc;
+        }
+        .mic-button {
+            transition: all 0.2s ease;
+        }
+        .mic-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .listening {
+            animation: pulse-ring 1.5s infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(76, 29, 149, 0.4); }
+            70% { box-shadow: 0 0 0 20px rgba(76, 29, 149, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 29, 149, 0); }
+        }
+        .alarm-active {
+            animation: alarm-shake 0.5s infinite;
+            border-color: #ef4444 !important;
+        }
+        @keyframes alarm-shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+        .countdown-time {
+            /* Ensure the countdown is easily visible */
+            font-weight: 600;
+            color: #4f46e5; /* Indigo-600 */
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex flex-col items-center">
+
+    <div id="app-container" class="w-full max-w-lg bg-white p-6 md:p-8 rounded-xl shadow-2xl transition-all duration-500 border-4 border-indigo-100">
+
+        <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">Vocal Reminders</h1>
+        <p class="text-center text-sm text-gray-500 mb-6">Your voice-activated personal assistant.</p>
+
+        <!-- Status Display -->
+        <div id="status-box" class="p-4 rounded-lg text-center font-medium bg-indigo-50 text-indigo-700 mb-6 border border-indigo-200 min-h-[5rem] flex items-center justify-center">
+            Click the microphone and say "Set a reminder for [task] in [duration]."
+        </div>
+
+        <!-- Microphone Button -->
+        <div class="flex justify-center mb-6">
+            <button id="mic-btn" class="mic-button p-6 rounded-full bg-indigo-600 text-white shadow-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 transition-all duration-200">
+                <!-- Simple Microphone Icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4z" />
+                    <path fill-rule="evenodd" d="M3 8a1 1 0 011 1v3.5A6.5 6.5 0 0017 12.5V9a1 1 0 112 0v3.5a8.5 8.5 0 01-17 0V9a1 1 0 011-1z" clip-rule="evenodd" />
+                </svg>
+            </button>
+        </div>
+        
+        <!-- Manual Input Box -->
+        <div class="mb-8 p-4 bg-gray-50 rounded-xl shadow-inner border border-gray-200">
+            <label for="reminder-input" class="block text-sm font-medium text-gray-700 mb-2">Or, Type Your Reminder or Command:</label>
+            <div class="flex space-x-2">
+                <input 
+                    type="text" 
+                    id="reminder-input" 
+                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-base shadow-sm"
+                    placeholder='e.g., "Call Mom in 5 min", "snooze 30s", "snooze 180", or "dismiss"'
+                >
+                <button 
+                    id="set-manual-btn"
+                    class="px-3 py-3 bg-indigo-500 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-600 transition-colors flex-shrink-0 flex items-center justify-center"
+                    title="Set Reminder"
+                >
+                    <!-- Document Plus Icon: Represents setting/adding a new reminder (writing a note) -->
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
+                        <path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.757a2 2 0 00-.586-1.414L9.757 2.586A2 2 0 008.343 2H4zm6 6.5a.75.75 0 00-1.5 0v1.5H7.5a.75.75 0 000 1.5h1.5v1.5a.75.75 0 001.5 0v-1.5h1.5a.75.75 0 000-1.5h-1.5v-1.5z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+
+        <!-- Reminders List -->
+        <h2 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Active Reminders</h2>
+        <ul id="reminders-list" class="space-y-3">
+            <li class="text-gray-500 italic">No reminders set.</li>
+        </ul>
+    </div>
+
+    <script>
+        // --- Core Application State & Constants ---
+        const $ = (id) => document.getElementById(id);
+        const STATUS_BOX = $('status-box');
+        const MIC_BTN = $('mic-btn');
+        const APP_CONTAINER = $('app-container');
+        const REMINDERS_LIST = $('reminders-list');
+        // New DOM references
+        const REMINDER_INPUT = $('reminder-input');
+        const SET_MANUAL_BTN = $('set-manual-btn');
+
+
+        let reminders = [];
+        let activeAlarm = null; // Stores the reminder object that is currently alarming
+        let recognition = null;
+        let alarmIntervalId = null;
+        let audioContext = null;
+
+        // --- Utility Functions ---
+
+        /** Sets the status message and speaks it if necessary. */
+        function setStatus(message, speak = false) {
+            console.log("Status: " + message);
+            STATUS_BOX.textContent = message;
+            if (speak) {
+                speakText(message);
+            }
+        }
+
+        /** Text-to-Speech function. */
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Stop previous speech
+                const utterance = new SpeechSynthesisUtterance(text);
+                // Attempt to find a US English voice for better clarity
+                utterance.voice = window.speechSynthesis.getVoices().find(voice => voice.name.includes('Google US English')) || window.speechSynthesis.getVoices()[0];
+                utterance.rate = 1.1;
+                window.speechSynthesis.speak(utterance);
+            } else {
+                console.warn('Speech Synthesis not supported.');
+            }
+        }
+
+        /** Parses a natural language time phrase (e.g., "in 5 minutes") into a Date object. */
+        function parseTimePhrase(phrase) {
+            const now = new Date();
+            let futureTime = new Date(now.getTime());
+
+            // Regex to find 'X minutes/hours/seconds'
+            const match = phrase.match(/(\d+|a|an|one) (minutes?|hours?|seconds?|min|sec|hr)/i);
+
+            if (match) {
+                let value = parseInt(match[1]);
+                if (isNaN(value)) {
+                    value = (match[1].toLowerCase() === 'one' || match[1].toLowerCase() === 'a' || match[1].toLowerCase() === 'an') ? 1 : 0;
+                }
+                const unit = match[2].toLowerCase();
+
+                if (unit.startsWith('minute') || unit === 'min') {
+                    futureTime.setMinutes(futureTime.getMinutes() + value);
+                } else if (unit.startsWith('hour') || unit === 'hr') {
+                    futureTime.setHours(futureTime.getHours() + value);
+                } else if (unit.startsWith('second') || unit === 'sec') {
+                    futureTime.setSeconds(futureTime.getSeconds() + value);
+                }
+            } else {
+                 setStatus('I could not parse the time. Please try "in 5 minutes".', true);
+                 return null;
+            }
+
+            return futureTime;
+        }
+        
+        /** Parses a snooze duration phrase (e.g., "30 seconds", "10 minutes", or "300") into milliseconds. */
+        function parseDuration(phrase) {
+            phrase = phrase.trim().toLowerCase();
+            
+            // 1. Check for 'X minutes/hours/seconds' pattern
+            const timeMatch = phrase.match(/(\d+|a|an|one) (minutes?|hours?|seconds?|min|sec|hr)/i);
+            
+            if (timeMatch) {
+                let value = parseInt(timeMatch[1]);
+                if (isNaN(value)) {
+                    value = (timeMatch[1].toLowerCase() === 'one' || timeMatch[1].toLowerCase() === 'a' || timeMatch[1].toLowerCase() === 'an') ? 1 : 0;
+                }
+                const unit = timeMatch[2].toLowerCase();
+
+                if (unit.startsWith('minute') || unit === 'min') {
+                    return value * 60 * 1000;
+                } else if (unit.startsWith('hour') || unit === 'hr') {
+                    return value * 3600 * 1000;
+                } else if (unit.startsWith('second') || unit === 'sec') {
+                    return value * 1000;
+                }
+            } 
+            
+            // 2. Check for raw seconds (e.g., "300")
+            const secondsMatch = phrase.match(/^(\d+)$/);
+            if (secondsMatch) {
+                const seconds = parseInt(secondsMatch[1]);
+                // Prevent ridiculously long raw-second snoozes (max 2 hours/7200 seconds)
+                if (seconds > 7200) {
+                     setStatus("Snooze time must be less than 2 hours.", true);
+                     return null;
+                }
+                return seconds * 1000;
+            }
+
+            return null; // Invalid duration phrase
+        }
+
+        /** Formats milliseconds into a human-readable Hh M:SS string. */
+        function formatTimeDifference(ms) {
+            if (ms < 0) return "DUE NOW!";
+            
+            let seconds = Math.floor(ms / 1000);
+            const hours = Math.floor(seconds / 3600);
+            seconds %= 3600;
+            const minutes = Math.floor(seconds / 60);
+            seconds %= 60;
+
+            const pad = (num) => String(num).padStart(2, '0');
+
+            if (hours > 0) {
+                return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${pad(seconds)}s`;
+            } else {
+                return `${seconds}s`;
+            }
+        }
+
+        // --- Reminder Logic ---
+
+        /** Adds a new reminder to the list. */
+        function addReminder(text, time) {
+            const id = Date.now();
+            reminders.push({ id, text, time, isActive: false, alarmTimeoutId: null });
+            setStatus(`Reminder set for "${text}" at ${time.toLocaleTimeString()}.`, true);
+            renderReminders();
+        }
+
+        /** Clears a reminder by ID or by matching the text. */
+        function clearReminder(idOrText) {
+            const initialLength = reminders.length;
+
+            if (typeof idOrText === 'number') {
+                // Delete by ID (used by UI button)
+                reminders = reminders.filter(r => r.id !== idOrText);
+            } else {
+                // Find and remove by text match (case-insensitive, used by voice command)
+                const text = idOrText.toLowerCase();
+                const index = reminders.findIndex(r => r.text.toLowerCase().includes(text));
+                if (index !== -1) {
+                    reminders.splice(index, 1);
+                }
+            }
+
+            if (reminders.length < initialLength) {
+                // Only announce dismissal if it was a successful delete
+                setStatus("The reminder has been dismissed.", true);
+                renderReminders();
+                if (activeAlarm && (activeAlarm.id === idOrText || (typeof idOrText === 'string' && activeAlarm.text.toLowerCase().includes(idOrText.toLowerCase())))) {
+                    stopAlarm();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /** Triggers the alarm sequence for a reminder. */
+        function triggerAlarm(reminder) {
+            if (activeAlarm) return; // Only one alarm at a time
+
+            activeAlarm = reminder;
+            APP_CONTAINER.classList.add('alarm-active');
+            setStatus(`ALARM: Time for "${reminder.text}"! Say or type "Snooze" or "Dismiss."`, true);
+
+            // 1. Start the sound (Tone Generator)
+            playAlarmSound();
+
+            // 2. Mark reminder as alarming
+            reminder.isActive = true;
+            renderReminders();
+        }
+
+        /** Stops the current alarm. */
+        function stopAlarm() {
+            if (activeAlarm) {
+                // Stop the sound
+                stopAlarmSound();
+
+                // Clear the visual/state indicators
+                activeAlarm.isActive = false;
+                activeAlarm = null;
+                APP_CONTAINER.classList.remove('alarm-active');
+                renderReminders();
+            }
+        }
+
+        /** Plays a simple beeping sound using AudioContext. */
+        function playAlarmSound() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (alarmIntervalId) clearInterval(alarmIntervalId);
+
+            let isPlaying = false;
+
+            const beep = () => {
+                if (isPlaying) return;
+                isPlaying = true;
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+                gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.start();
+                
+                // Stop sound after 0.2 seconds
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.2);
+                oscillator.stop(audioContext.currentTime + 0.2);
+                setTimeout(() => { isPlaying = false; }, 200);
+            };
+
+            // Beep every 0.7 seconds
+            beep();
+            alarmIntervalId = setInterval(beep, 700);
+        }
+
+        /** Stops the simple alarm sound. */
+        function stopAlarmSound() {
+            if (alarmIntervalId) {
+                clearInterval(alarmIntervalId);
+                alarmIntervalId = null;
+            }
+        }
+
+
+        /** Snoozes the current active alarm for a specified duration in milliseconds. */
+        function snoozeAlarm(durationMs = 5 * 60 * 1000) { // Default to 5 minutes
+            if (!activeAlarm) {
+                setStatus("There is no active alarm to snooze.", true);
+                return;
+            }
+            const newTime = new Date(Date.now() + durationMs);
+
+            // Calculate display duration for feedback
+            let displayDuration;
+            if (durationMs < 60000) {
+                displayDuration = `${durationMs / 1000} seconds`;
+            } else if (durationMs < 3600000) {
+                const minutes = Math.floor(durationMs / 60000);
+                const seconds = Math.floor((durationMs % 60000) / 1000);
+                
+                if (seconds > 0) {
+                    displayDuration = `${minutes} minute${minutes !== 1 ? 's' : ''} and ${seconds} second${seconds !== 1 ? 's' : ''}`;
+                } else {
+                     displayDuration = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+                }
+            } else {
+                // Simple case for hours
+                displayDuration = `${durationMs / 3600000} hours`;
+            }
+
+
+            activeAlarm.time = newTime;
+            activeAlarm.isActive = false;
+            
+            setStatus(`Alarm snoozed for ${displayDuration}. New time is ${newTime.toLocaleTimeString()}.`, true);
+            stopAlarm();
+            renderReminders();
+        }
+
+        /** Reschedules a reminder. (For simplicity, only works on the active alarm text) */
+        function rescheduleReminder(newTimePhrase) {
+            if (!activeAlarm) {
+                setStatus("To reschedule, the alarm must be active or you must explicitly say the reminder text.", true);
+                return;
+            }
+            
+            const newTime = parseTimePhrase(newTimePhrase);
+            if (newTime) {
+                activeAlarm.time = newTime;
+                activeAlarm.isActive = false;
+
+                setStatus(`Alarm successfully rescheduled for ${newTime.toLocaleTimeString()}.`, true);
+                stopAlarm();
+                renderReminders();
+            }
+        }
+
+        /** Loop to check if any reminders are due. */
+        function checkReminders() {
+            const now = new Date();
+            for (let reminder of reminders) {
+                if (!reminder.isActive && reminder.time <= now) {
+                    triggerAlarm(reminder);
+                    // We keep it in 'activeAlarm' state until dismissed/snoozed.
+                }
+            }
+        }
+        
+        /** Updates the countdown display for all reminders. */
+        function updateCountdowns() {
+            const now = Date.now();
+            for (const reminder of reminders) {
+                const countdownElement = $(`countdown-${reminder.id}`);
+                
+                if (countdownElement) {
+                    if (!reminder.isActive) { 
+                        const diff = reminder.time.getTime() - now;
+                        countdownElement.textContent = formatTimeDifference(diff);
+                        
+                        // Change color if approaching due time
+                        if (diff < 60000) { // Less than 1 minute
+                            countdownElement.classList.remove('text-indigo-500');
+                            countdownElement.classList.add('text-orange-500');
+                        } else {
+                            countdownElement.classList.remove('text-orange-500');
+                            countdownElement.classList.add('text-indigo-500');
+                        }
+
+                    } else {
+                        // Alarm is active, display a fixed message
+                        countdownElement.textContent = "ALARM RINGING";
+                    }
+                }
+            }
+        }
+
+        /** Main loop to check alarms and update the display. */
+        function mainLoop() {
+            checkReminders(); 
+            updateCountdowns();
+        }
+        
+        // --- UI Action Handlers ---
+
+        /** Handles deletion triggered by the UI button. */
+        function deleteReminderUI(id) {
+            // Confirm deletion via TTS and status update
+            setStatus("Deleting reminder.", true);
+            clearReminder(id);
+        }
+        
+        /** Handles setting a reminder via the manual text input, including snooze/dismiss commands. */
+        function handleManualSet() {
+            const input = REMINDER_INPUT.value.trim();
+            const lowerInput = input.toLowerCase(); // Get lowercased version for command checking
+
+            if (!input) {
+                setStatus("Please enter a reminder phrase or command in the box.", true);
+                return;
+            }
+
+            // --- 1. Check for Snooze Command (Accepts custom time) ---
+            if (lowerInput.startsWith('snooze')) {
+                let durationMs = 5 * 60 * 1000; // Default to 5 minutes (300000 ms)
+                
+                // Get the part of the input after "snooze"
+                const durationPhrase = input.substring('snooze'.length).trim();
+                
+                if (durationPhrase.length > 0) {
+                    const parsedDuration = parseDuration(durationPhrase);
+
+                    if (parsedDuration !== null && parsedDuration > 0) {
+                        durationMs = parsedDuration;
+                    } else if (durationPhrase !== "") {
+                        // Only announce if user provided a duration we failed to parse
+                        setStatus("Snooze command recognized, but I could not parse the duration. Using default 5 minutes.", true);
+                    }
+                }
+                
+                snoozeAlarm(durationMs);
+                REMINDER_INPUT.value = ''; // Clear input field
+                return;
+            }
+            
+            // --- 2. Check for Dismiss Command ---
+            if (lowerInput === 'dismiss') {
+                if (activeAlarm) {
+                    // Clear the reminder associated with the active alarm, which also stops the alarm sound/visuals.
+                    clearReminder(activeAlarm.id); 
+                    REMINDER_INPUT.value = ''; // Clear input field
+                    return;
+                } else {
+                    setStatus("There is no active alarm to dismiss.", true);
+                    REMINDER_INPUT.value = '';
+                    return;
+                }
+            }
+
+            // --- 3. Process as a new Reminder ---
+            // Look for a phrase structure like: "TASK [at/in/on] TIME"
+            const manualMatch = input.match(/(.+?) (?:at|in|on) (.+)/i);
+
+            if (manualMatch && manualMatch.length === 3) {
+                const text = manualMatch[1].trim();
+                const timePhrase = manualMatch[2].trim();
+                const time = parseTimePhrase(timePhrase);
+                
+                if (time) {
+                    addReminder(text, time);
+                    REMINDER_INPUT.value = ''; // Clear input field
+                }
+            } else {
+                setStatus("I couldn't parse that. Please use 'Task in [time]', 'snooze', 'snooze [time]', or 'dismiss'.", true);
+            }
+        }
+
+
+        // --- UI Rendering ---
+
+        function renderReminders() {
+            if (reminders.length === 0) {
+                REMINDERS_LIST.innerHTML = '<li class="text-gray-500 italic p-3">No reminders set.</li>';
+                return;
+            }
+
+            REMINDERS_LIST.innerHTML = reminders
+                .sort((a, b) => a.time - b.time)
+                .map(r => {
+                    // statusClass is now mostly for the list item color
+                    const statusClass = r.isActive ? 'bg-red-100 text-red-800 border-red-400' : 'bg-white text-gray-800 border-gray-200';
+                    const timeString = r.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: undefined });
+
+                    return `
+                        <li class="p-3 rounded-lg flex justify-between items-center shadow-md transition-shadow border-2 ${statusClass}">
+                            <div class="flex flex-col flex-grow min-w-0 pr-4">
+                                <span class="text-base font-semibold truncate">${r.text}</span>
+                                <span id="countdown-${r.id}" class="text-sm font-mono countdown-time mt-1">Calculating...</span>
+                            </div>
+                            <div class="flex items-center space-x-3 flex-shrink-0">
+                                <!-- Original set time for reference -->
+                                <span class="text-xs text-gray-500 hidden sm:inline">@ ${timeString}</span>
+                                <button 
+                                    class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition-colors"
+                                    onclick="deleteReminderUI(${r.id})"
+                                    title="Delete Reminder"
+                                >
+                                    <!-- Trash Icon -->
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                      <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </li>
+                    `;
+                })
+                .join('');
+             updateCountdowns(); // Initial countdown calculation right after rendering
+        }
+
+        // --- Speech Recognition Setup ---
+
+        function setupSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window)) {
+                STATUS_BOX.textContent = "Speech Recognition not supported in this browser.";
+                MIC_BTN.disabled = true;
+                return;
+            }
+
+            // Use webkitSpeechRecognition for broader compatibility
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false; // Only one command per mic click
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                MIC_BTN.classList.add('listening');
+                setStatus("Listening... Speak your command now.");
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                MIC_BTN.classList.remove('listening');
+                handleVoiceCommand(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                MIC_BTN.classList.remove('listening');
+                if (event.error === 'not-allowed') {
+                    setStatus("Microphone permission denied. Please allow access in your browser settings.", true);
+                } else if (event.error === 'no-speech') {
+                     setStatus("No speech detected. Please try again.", true);
+                } else {
+                    setStatus(`Speech recognition error: ${event.error}`, true);
+                }
+            };
+
+            recognition.onend = () => {
+                MIC_BTN.classList.remove('listening');
+            };
+
+            MIC_BTN.onclick = () => {
+                if (MIC_BTN.classList.contains('listening')) {
+                    recognition.stop();
+                } else {
+                    recognition.start();
+                }
+            };
+        }
+
+        // --- Initialization ---
+
+        function handleVoiceCommand(transcript) {
+            const lowerTranscript = transcript.toLowerCase();
+            const match = lowerTranscript.match(/set a reminder for (.+) in (.+)/);
+
+            if (activeAlarm) {
+                // Handle active alarm commands (Snooze or Dismiss)
+                if (lowerTranscript.includes('snooze')) {
+                    let durationMs = 5 * 60 * 1000; // Default to 5 minutes
+                    // Look for a duration phrase after 'snooze'
+                    const snoozeMatch = lowerTranscript.match(/snooze for (.+)/) || lowerTranscript.match(/snooze (.+)/);
+                    if (snoozeMatch) {
+                        const parsedDuration = parseDuration(snoozeMatch[1]);
+                        if (parsedDuration !== null && parsedDuration > 0) {
+                            durationMs = parsedDuration;
+                        }
+                    }
+                    snoozeAlarm(durationMs);
+                    return;
+                } else if (lowerTranscript.includes('dismiss') || lowerTranscript.includes('clear')) {
+                    // Dismiss the active alarm's reminder
+                    clearReminder(activeAlarm.id);
+                    return;
+                }
+            }
+            
+            // Handle setting a new reminder
+            if (match && match.length === 3) {
+                const text = match[1].trim();
+                const timePhrase = match[2].trim();
+                const time = parseTimePhrase(timePhrase);
+                
+                if (time) {
+                    addReminder(text, time);
+                }
+                return;
+            }
+
+            // Handle dismissal of a specific, non-alarming reminder by text
+            if (lowerTranscript.includes('dismiss') || lowerTranscript.includes('clear')) {
+                const dismissMatch = lowerTranscript.match(/(dismiss|clear) (.+)/);
+                if (dismissMatch) {
+                    const reminderText = dismissMatch[2].trim();
+                    if (clearReminder(reminderText)) {
+                        return; // Successfully dismissed by text
+                    }
+                }
+            }
+
+            // Fallback for unmatched voice commands
+            setStatus(`I heard "${transcript}" but I couldn't understand that command. Please try "Set a reminder for [task] in [duration]."`, true);
+        }
+
+        window.onload = () => {
+            // Attach event listeners for the manual input box
+            SET_MANUAL_BTN.onclick = handleManualSet;
+            REMINDER_INPUT.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleManualSet();
+                }
+            });
+
+            // Start the main loop (checks alarms and updates timers)
+            setInterval(mainLoop, 1000); 
+
+            // Pre-load voices for quick TTS response
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.getVoices();
+            }
+            setupSpeechRecognition();
+            setStatus("Welcome! Click the microphone or type below to set reminders.");
+            renderReminders();
+        };
+
+    </script>
+</body>
+</html>
