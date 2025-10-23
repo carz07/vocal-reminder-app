@@ -73,7 +73,14 @@
         import { getFirestore, doc, addDoc, onSnapshot, collection, query, updateDoc, deleteDoc, setLogLevel, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global Firebase variables provided by the Canvas environment
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        
+        // Define a minimal default config with a placeholder projectId
+        const defaultFirebaseConfig = { projectId: "default-canvas-project-id" }; 
+        
+        // Merge the provided config with the default, ensuring projectId is present
+        const environmentConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const firebaseConfig = { ...defaultFirebaseConfig, ...environmentConfig };
+        
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
@@ -162,15 +169,7 @@
         // 1. Initial Authentication & Firestore Setup
         async function setupFirebase() {
             try {
-                // Check if the essential projectId is present
-                if (!firebaseConfig.projectId) {
-                    const configError = "The app configuration is missing the required 'projectId'. Cannot connect to Firestore.";
-                    console.error("FATAL CONFIGURATION ERROR:", configError);
-                    await showCustomModal("Configuration Error", configError);
-                    return; // Stop execution if config is invalid
-                }
-                
-                // Initialize Firebase services
+                // Initialize Firebase services using the merged config
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -185,7 +184,7 @@
                         if (initialAuthToken) {
                             await signInWithCustomToken(auth, initialAuthToken);
                         } else {
-                            // Use a temporary unique ID if anonymous sign-in fails or is not preferred
+                            // Fallback to anonymous sign-in
                             await signInAnonymously(auth);
                         }
                     }
@@ -198,7 +197,7 @@
                 });
             } catch (error) {
                 console.error("Error initializing Firebase or signing in:", error);
-                await showCustomModal("Error Initializing App", `An error occurred during setup. Please check the console for details. (Error: ${error.message})`);
+                await showCustomModal("Error Initializing App", `A core configuration error persists. Please try refreshing. (Error: ${error.message})`);
             }
         }
         
