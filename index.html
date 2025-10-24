@@ -109,27 +109,10 @@
         </div>
     </div>
 
-    <!-- Firebase SDK Imports -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, deleteDoc, orderBy, getDocs, where, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script>
+        // --- GLOBAL SETUP (NO FIREBASE) ---
 
-        // Set Firebase logging level for debugging
-        setLogLevel('Debug');
-
-        // --- GLOBAL SETUP ---
-
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
-        let userId = null;
+        const STORAGE_KEY = 'vocalReminders';
         let reminders = [];
         let recognition = null; // Speech Recognition API instance
 
@@ -148,27 +131,6 @@
         const MIC_STATUS = document.getElementById('mic-status');
 
         // --- Utility Functions ---
-
-        /**
-         * Safely serializes a complex object/array for Firestore storage.
-         * @param {any} data
-         * @returns {string} JSON string
-         */
-        const serializeData = (data) => JSON.stringify(data);
-
-        /**
-         * Safely parses a JSON string retrieved from Firestore.
-         * @param {string} dataString
-         * @returns {any} Parsed object/array
-         */
-        const deserializeData = (dataString) => {
-            try {
-                return JSON.parse(dataString);
-            } catch (e) {
-                console.error("Error parsing data from Firestore:", e, dataString);
-                return dataString;
-            }
-        };
 
         /**
          * Formats a timestamp into a human-readable date and time string.
@@ -201,6 +163,66 @@
             }
         };
 
+        // --- Local Storage CRUD ---
+
+        /**
+         * Loads reminders from local storage.
+         */
+        const loadReminders = () => {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+                reminders = stored ? JSON.parse(stored) : [];
+                // Ensure reminders are sorted by timestamp for display
+                reminders.sort((a, b) => a.timestamp - b.timestamp); 
+                renderReminders();
+            } catch (e) {
+                console.error("Error loading from local storage:", e);
+                setStatus("Error loading previous reminders.", true);
+                reminders = [];
+            }
+        };
+
+        /**
+         * Saves the current reminder array to local storage.
+         */
+        const saveReminders = () => {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
+                renderReminders();
+            } catch (e) {
+                console.error("Error saving to local storage:", e);
+                setStatus("Error saving reminders.", true);
+            }
+        };
+
+        /**
+         * Adds a new reminder to the local array and saves.
+         * @param {string} text Reminder text.
+         * @param {number} timestamp Target timestamp in milliseconds.
+         */
+        const addReminder = (text, timestamp) => {
+            const newId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+            reminders.push({
+                id: newId,
+                text: text,
+                timestamp: timestamp,
+                createdAt: Date.now()
+            });
+            reminders.sort((a, b) => a.timestamp - b.timestamp);
+            saveReminders();
+            setStatus(`Reminder set for: ${formatTime(timestamp)}`, false);
+        };
+
+        /**
+         * Deletes a reminder from the local array and saves.
+         * @param {string} id Unique ID of the reminder to delete.
+         */
+        const deleteReminder = (id) => {
+            reminders = reminders.filter(r => r.id !== id);
+            saveReminders();
+        };
+
+
         // --- Core Logic: Time Parsing ---
 
         /**
@@ -214,7 +236,6 @@
             let targetTime = null;
 
             // 1. Relative Time Parsing (e.g., "5 seconds", "2 hours", "3 days")
-            // Looks for the quantity and unit directly.
             const relativeMatch = lowerPhrase.match(/(\d+)\s+(second|minute|hour|day|week)s?/i);
 
             if (relativeMatch) {
@@ -279,82 +300,6 @@
             return null;
         };
 
-
-        // --- Firebase CRUD Operations ---
-
-        /**
-         * Gets the Firestore collection reference for reminders.
-         */
-        const getRemindersCollectionRef = () => {
-            // Private data storage path: /artifacts/{appId}/users/{userId}/reminders
-            return collection(db, `artifacts/${appId}/users/${userId}/reminders`);
-        };
-
-        /**
-         * Adds a new reminder to Firestore.
-         * @param {string} text Reminder text.
-         * @param {number} timestamp Target timestamp in milliseconds.
-         */
-        const addReminder = async (text, timestamp) => {
-            if (!userId) {
-                setStatus("Authentication not ready. Please wait a moment for the user ID to load.", true);
-                return;
-            }
-            try {
-                await addDoc(getRemindersCollectionRef(), {
-                    text: text,
-                    timestamp: timestamp,
-                    createdAt: Date.now()
-                });
-                setStatus(`Reminder set for: ${formatTime(timestamp)}`, false);
-            } catch (e) {
-                console.error("Error adding document: ", e);
-                setStatus("Error saving reminder to database.", true);
-            }
-        };
-
-        /**
-         * Deletes a reminder from Firestore.
-         * @param {string} id Document ID.
-         */
-        const deleteReminder = async (id) => {
-            if (!userId) return;
-            try {
-                await deleteDoc(doc(getRemindersCollectionRef(), id));
-            } catch (e) {
-                console.error("Error deleting document: ", e);
-            }
-        };
-
-        // --- Real-time Data Listener ---
-
-        const setupFirestoreListener = () => {
-            if (!userId) return;
-
-            // Query: Get all reminders, sorted by time, limited to 50
-            const q = query(
-                getRemindersCollectionRef(),
-                orderBy("timestamp", "asc"),
-                limit(50)
-            );
-
-            onSnapshot(q, (querySnapshot) => {
-                const fetchedReminders = [];
-                querySnapshot.forEach((doc) => {
-                    fetchedReminders.push({
-                        id: doc.id,
-                        ...doc.data()
-                    });
-                });
-                reminders = fetchedReminders;
-                renderReminders();
-                console.log("Reminders updated:", reminders.length);
-            }, (error) => {
-                console.error("Firestore snapshot error:", error);
-                setStatus("Failed to load reminders. Check console for details.", true);
-            });
-        };
-
         // --- UI Rendering ---
 
         /**
@@ -362,14 +307,18 @@
          */
         const renderReminders = () => {
             REMINDERS_LIST.innerHTML = '';
-            if (reminders.length === 0) {
+            
+            // Filter out old reminders (optional cleanup for display)
+            const activeReminders = reminders.filter(r => r.timestamp > Date.now()); 
+            
+            if (activeReminders.length === 0) {
                 REMINDERS_LIST.innerHTML = '<p id="no-reminders" class="text-center text-gray-500 p-4 bg-white rounded-lg shadow-md">No reminders set yet.</p>';
                 return;
             }
 
-            reminders.forEach(r => {
+            activeReminders.forEach(r => {
                 const now = Date.now();
-                const isPast = r.timestamp < now;
+                const isPast = r.timestamp < now; // Although filtered, keep logic for edge cases
 
                 const reminderElement = document.createElement('div');
                 reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md ${isPast ? 'bg-gray-200 opacity-60' : 'bg-white hover:shadow-lg transition duration-150'}`;
@@ -450,13 +399,14 @@
             const durationInMinutes = parseInt(SNOOZE_DURATION_SELECT.value, 10);
             const snoozeTime = Date.now() + (durationInMinutes * 60 * 1000);
             
-            // Find the reminder and reset its time for the snooze
+            // Find the reminder that triggered the alarm
             const reminderToSnooze = reminders.find(r => r.id === currentAlarmId);
 
             if (reminderToSnooze) {
-                // Add a new reminder for the snooze time, and delete the old one.
-                addReminder(`(Snoozed) ${reminderToSnooze.text}`, snoozeTime);
+                // Delete the original reminder
                 deleteReminder(currentAlarmId);
+                // Add a new reminder for the snooze time.
+                addReminder(`(Snoozed) ${reminderToSnooze.text}`, snoozeTime);
             }
 
             hideAlarm();
@@ -599,35 +549,8 @@
 
         // --- Initialization ---
 
-        const initializeAppAndAuth = async () => {
-            setStatus("Connecting to database...", false);
-            try {
-                // Sign in with custom token if available, otherwise anonymously
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                // Wait for auth state to be finalized
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        setStatus(`Ready! User ID: ${userId}`, false);
-                        setupFirestoreListener(); // Start listening for data once authenticated
-                    } else {
-                        setStatus("Could not authenticate user. Reminders will not be saved.", true);
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase Auth Error:", error);
-                setStatus("Critical Error: Firebase authentication failed.", true);
-            }
-        };
-
         window.onload = () => {
-            initializeAppAndAuth();
+            loadReminders(); // Load existing reminders from local storage
             
             SET_MANUAL_BTN.onclick = handleManualSet;
             REMINDER_INPUT.addEventListener('keypress', (e) => {
