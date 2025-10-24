@@ -214,8 +214,8 @@
             let targetTime = null;
 
             // 1. Relative Time Parsing (e.g., "5 seconds", "2 hours", "3 days")
-            // CRITICAL FIX: Looks for the quantity and unit directly, assuming the preposition (in/at/on) was removed.
-            const relativeMatch = lowerPhrase.match(/^(\d+)\s+(second|minute|hour|day|week)s?$/i);
+            // Looks for the quantity and unit directly.
+            const relativeMatch = lowerPhrase.match(/(\d+)\s+(second|minute|hour|day|week)s?/i);
 
             if (relativeMatch) {
                 const value = parseInt(relativeMatch[1], 10);
@@ -239,11 +239,9 @@
                         targetTime.setDate(now.getDate() + (value * 7));
                         break;
                     default:
-                        // Should not happen, but safe guard
                         return null;
                 }
                 
-                // Ensure the time is in the future
                 if (targetTime.getTime() > now.getTime()) {
                     setStatus(`Parsed time: ${formatTime(targetTime)} (Relative to now).`, false);
                     return targetTime.getTime();
@@ -252,19 +250,13 @@
 
             // 2. Specific Time/Date Parsing (e.g., "tomorrow at 5pm", "October 25 at 11am", "4:30 PM")
             try {
-                // Use Date constructor for explicit dates (like "October 25 at 4:30 PM")
-                // This is browser-dependent but is the simplest built-in mechanism.
                 let parsedDate = new Date(phrase);
                 
                 if (!isNaN(parsedDate.getTime())) {
                     if (parsedDate.getTime() <= now.getTime()) {
-                        // If the parsed time is in the past, assume they meant a recurring time today (which is now past)
-                        // or a simple time (like "4 PM") which should be set for the next day.
-                        const today = new Date();
-                        const timeOnly = parsedDate.toDateString() === today.toDateString();
-
+                        // If only a time was specified (e.g., "5 PM"), set it for tomorrow.
+                        const timeOnly = parsedDate.toDateString() === now.toDateString();
                         if (timeOnly) {
-                            // If only a time was specified (e.g., "5 PM"), set it for tomorrow.
                             parsedDate.setDate(parsedDate.getDate() + 1);
                         } else {
                             // If a full date was specified in the past, treat it as invalid.
@@ -282,7 +274,7 @@
                 return targetTime.getTime();
             }
 
-            // If both relative and specific parsing fails
+            // If all parsing fails
             setStatus(`Couldn't understand the time phrase "${phrase}". Please be more specific.`, true);
             return null;
         };
@@ -305,7 +297,7 @@
          */
         const addReminder = async (text, timestamp) => {
             if (!userId) {
-                setStatus("Authentication not ready. Please wait.", true);
+                setStatus("Authentication not ready. Please wait a moment for the user ID to load.", true);
                 return;
             }
             try {
@@ -501,16 +493,21 @@
             if (!inputContent) { return; }
 
             // Tries to match: "[task] (on|in|at) [time phrase]"
-            const match = inputContent.match(/(.+?) (?:on|in|at) (.+)/i);
+            // Using \s+ for robust space matching around prepositions.
+            const match = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
 
             if (match && match.length === 3) {
                 const text = match[1].trim();
                 const timePhrase = match[2].trim();
+                
+                // Keep the input text if time parsing fails, so user can easily correct the time.
+                REMINDER_INPUT.value = text + ' ' + timePhrase; 
+                
                 const time = parseReminderTime(timePhrase);
                 
                 if (time) {
                     addReminder(text, time);
-                    REMINDER_INPUT.value = '';
+                    REMINDER_INPUT.value = ''; // Clear only on successful addition
                 }
             } else {
                 setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase]", true);
@@ -582,13 +579,12 @@
             }
 
             // 2. Main Reminder Pattern (Voice Command)
-            // Tries to match: "set a reminder for [task] (on|in|at) [time phrase]"
             const match = lowerTranscript.match(/set a reminder for (.+?) (?:on|in|at) (.+)/);
             
             if (match && match.length === 3) {
                 const text = match[1].trim();
                 const timePhrase = match[2].trim();
-                const time = parseReminderTime(timePhrase); // The fix in parseReminderTime now handles "5 seconds" properly
+                const time = parseReminderTime(timePhrase); 
                 
                 if (time) {
                     addReminder(text, time);
@@ -604,6 +600,7 @@
         // --- Initialization ---
 
         const initializeAppAndAuth = async () => {
+            setStatus("Connecting to database...", false);
             try {
                 // Sign in with custom token if available, otherwise anonymously
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -616,7 +613,7 @@
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
-                        setStatus(`User ID: ${userId}`, false);
+                        setStatus(`Ready! User ID: ${userId}`, false);
                         setupFirestoreListener(); // Start listening for data once authenticated
                     } else {
                         setStatus("Could not authenticate user. Reminders will not be saved.", true);
