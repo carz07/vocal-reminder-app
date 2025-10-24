@@ -75,7 +75,7 @@
                     type="text" 
                     id="reminder-input" 
                     class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-base shadow-sm"
-                    placeholder='e.g., "Call Mom on Dec 25 at 11:30am", "snooze 5m", or "dismiss"'
+                    placeholder='e.g., "Call Mom 11:30am", "Buy milk in 5 minutes", "snooze 5m", or "dismiss"'
                 >
                 <button 
                     id="set-manual-btn"
@@ -153,17 +153,18 @@
             let futureTime = new Date(now.getTime());
 
             // --- 0. KEYWORD DATE PARSING (Handles "tomorrow" or "today") ---
+            let isTomorrow = false;
             if (phrase.includes('tomorrow')) {
                 futureTime.setDate(futureTime.getDate() + 1);
+                isTomorrow = true;
             } else if (phrase.includes('today')) {
-                // If the time is set in the past, it will roll over to the next day later.
+                // Keep current date
             }
             // Remove keywords so they don't interfere with later parsing
             phrase = phrase.replace('tomorrow', '').replace('today', '').trim();
 
 
-            // --- 1. RELATIVE TIME PARSING (e.g., "in 5 minutes", "in 3 hours") ---
-            // Added check for "next week/day" to handle common phrases without "in"
+            // --- 1. RELATIVE TIME PARSING (e.g., "in 5 minutes", "for 3 hours") ---
             const relativeMatch = phrase.match(/(?:in|after|for) (\d+|a|an|one) (minutes?|hours?|seconds?|min|sec|hr|day|week|month|year)s?/i) ||
                                   phrase.match(/(next|this) (day|week|month|year)/i);
             
@@ -204,8 +205,7 @@
                     }
                 }
                 
-                // If relative time puts us in the past (e.g., "in 5 minutes" was called at 12:00:00 and now it's 12:00:01)
-                // We ensure it is at least 1 second in the future.
+                // Ensure it's in the future
                 if (futureTime.getTime() <= now.getTime()) {
                     futureTime = new Date(now.getTime() + 1000);
                 }
@@ -214,8 +214,8 @@
             }
 
             // --- 2. ABSOLUTE DATE/TIME PARSING (e.g., "October 25 at 11am") ---
-            // Regex captures: [Month Name/Abbr] [Day] (optional: at [Hour:Minute] [AM/PM])
-            const absoluteMatch = phrase.match(/([a-z]+) (\d{1,2})(?: at (\d{1,2})(?::(\d{1,2}))? ?(am|pm)?)?/i);
+            // Handles month names followed by day, with optional time
+            const absoluteMatch = phrase.match(/([a-z]+) (\d{1,2})(?: at | by | )?(\d{1,2})(?::(\d{1,2}))? ?(am|pm)?/i);
 
             if (absoluteMatch) {
                 const monthStr = absoluteMatch[1];
@@ -230,15 +230,8 @@
                     return null;
                 }
 
-                // If a date was set via tomorrow/today in step 0, we preserve that date, 
-                // otherwise we set the month/day/year based on input.
-                if (futureTime.getDate() !== now.getDate() || futureTime.getMonth() !== now.getMonth()) {
-                    // Date was set by 'tomorrow', so we only overwrite time.
-                } else {
-                    // Set the date based on input
-                    futureTime.setFullYear(now.getFullYear(), month, day);
-                }
-
+                // Set the date based on input
+                futureTime.setFullYear(now.getFullYear(), month, day);
 
                 // Adjust for 12/24 hour time
                 if (ampm === 'pm' && hour < 12) {
@@ -260,39 +253,50 @@
                 return futureTime;
             }
 
-            // --- 3. PARSING FOR SIMPLE TIME (e.g., "at 5pm" when the date is already known) ---
-             const simpleTimeMatch = phrase.match(/(?:at|by) (\d{1,2})(?::(\d{1,2}))? ?(am|pm)?/i);
+            // --- 3. PARSING FOR SIMPLE TIME (e.g., "5pm", "at 10:30") ---
+            // If tomorrow/today keyword was used, we just need to parse the time.
+             const simpleTimeMatch = phrase.match(/(\d{1,2})(?::(\d{1,2}))? ?(am|pm)?/i);
 
             if (simpleTimeMatch) {
-                let hour = parseInt(simpleTimeMatch[1] || '0');
-                let minute = parseInt(simpleTimeMatch[2] || '0');
-                const ampm = simpleTimeMatch[3] ? simpleTimeMatch[3].toLowerCase() : null;
+                // If only digits are matched (e.g., '10' or '30') assume it's an hour or minute and skip this for safety.
+                if (!simpleTimeMatch[3] && !simpleTimeMatch[2] && simpleTimeMatch[1].length < 3) {
+                     // Fall through to error
+                } else {
+                    let hour = parseInt(simpleTimeMatch[1] || '0');
+                    let minute = parseInt(simpleTimeMatch[2] || '0');
+                    const ampm = simpleTimeMatch[3] ? simpleTimeMatch[3].toLowerCase() : null;
 
-                // Adjust for 12/24 hour time
-                if (ampm === 'pm' && hour < 12) {
-                    hour += 12;
-                } else if (ampm === 'am' && hour === 12) {
-                    hour = 0;
-                }
+                    // Adjust for 12/24 hour time
+                    if (ampm === 'pm' && hour < 12) {
+                        hour += 12;
+                    } else if (ampm === 'am' && hour === 12) {
+                        hour = 0;
+                    }
 
-                futureTime.setHours(hour, minute, 0, 0);
+                    // Reset to clean date/time if it's not tomorrow
+                    if (!isTomorrow) {
+                        futureTime.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+                    }
+                    
+                    futureTime.setHours(hour, minute, 0, 0);
 
-                // If setting a simple time (e.g., "at 5pm") and the time is now in the past
-                if (futureTime.getTime() < now.getTime() && (futureTime.getDate() === now.getDate())) {
-                    // Push to tomorrow if the time is today but in the past
-                    futureTime.setDate(futureTime.getDate() + 1);
+                    // If setting a simple time (e.g., "at 5pm") and the time is now in the past
+                    if (futureTime.getTime() < now.getTime() && (futureTime.getDate() === now.getDate())) {
+                        // Push to tomorrow if the time is today but in the past
+                        futureTime.setDate(futureTime.getDate() + 1);
+                    }
+                    
+                    if (futureTime.getTime() <= now.getTime()) {
+                        futureTime = new Date(now.getTime() + 1000); // Ensure at least 1 second in future
+                    }
+                    
+                    return futureTime;
                 }
-                
-                if (futureTime.getTime() <= now.getTime()) {
-                    futureTime = new Date(now.getTime() + 1000); // Ensure at least 1 second in future
-                }
-                
-                return futureTime;
             }
 
 
             // --- 4. PARSING FAILED ---
-            setStatus('I could not parse the date or duration. Try "October 25 at 11am" or "in 5 minutes".', true);
+            setStatus('I could not parse the date or duration. Try "October 25 11am" or "in 5 minutes".', true);
             return null;
         }
 
@@ -549,56 +553,74 @@
                 return;
             }
 
-            // 1. Snooze Command
-            if (lowerInput.startsWith('snooze')) {
-                let durationMs = 5 * 60 * 1000;
-                const durationPhrase = input.substring('snooze'.length).trim();
-                
-                if (durationPhrase.length > 0) {
-                    const parsedDuration = parseDuration(durationPhrase);
-
-                    if (parsedDuration !== null && parsedDuration > 0) {
-                        durationMs = parsedDuration;
-                    } else if (durationPhrase !== "") {
-                        setStatus("Snooze command recognized, but I could not parse the duration. Using default 5 minutes.", true);
+            // 1. Snooze/Dismiss Commands
+            if (lowerInput.startsWith('snooze') || lowerInput.startsWith('dismiss')) {
+                if (lowerInput.startsWith('snooze')) {
+                    let durationMs = 5 * 60 * 1000;
+                    const durationPhrase = input.substring('snooze'.length).trim();
+                    if (durationPhrase.length > 0) {
+                        const parsedDuration = parseDuration(durationPhrase);
+                        if (parsedDuration !== null && parsedDuration > 0) { durationMs = parsedDuration; }
                     }
+                    snoozeAlarm(durationMs);
+                } else {
+                    if (activeAlarm) { clearReminder(activeAlarm.id); } 
+                    else { setStatus("There is no active alarm to dismiss.", true); }
                 }
-                
-                snoozeAlarm(durationMs);
                 REMINDER_INPUT.value = '';
                 return;
             }
-            
-            // 2. Dismiss Command
-            if (lowerInput === 'dismiss') {
-                if (activeAlarm) {
-                    clearReminder(activeAlarm.id); 
-                    REMINDER_INPUT.value = '';
-                    return;
-                } else {
-                    setStatus("There is no active alarm to dismiss.", true);
-                    REMINDER_INPUT.value = '';
-                    return;
+
+            // 2. Determine split point between task and time phrase (FIXED FOR FLEXIBILITY)
+            // Keywords that usually signal the start of a time expression
+            const timeSeparators = ['in ', 'on ', 'at ', 'by ', 'for ', 'next ', 'tomorrow', 'today', 'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 'am', 'pm'];
+            let splitIndex = -1;
+
+            for (const separator of timeSeparators) {
+                const index = lowerInput.indexOf(separator);
+                // Ensure the separator is not at the very start (e.g., 'In 5 minutes') or part of a command
+                if (index > 0) { 
+                    splitIndex = index;
+                    break;
                 }
             }
+            
+            let text;
+            let timePhrase;
 
-            // 3. Process as a new Reminder 
-            // FIX: Added 'by', 'next', 'tomorrow', 'today' to the list of acceptable separators to improve flexibility.
-            const manualMatch = input.match(/(.+?) (?:at|in|on|for|by|next|tomorrow|today) (.+)/i);
-
-            if (manualMatch && manualMatch.length === 3) {
-                const text = manualMatch[1].trim();
-                const timePhrase = manualMatch[2].trim();
-                const time = parseReminderTime(timePhrase);
-                
-                if (time) {
-                    addReminder(text, time);
-                    REMINDER_INPUT.value = '';
-                } else {
-                     setStatus("I couldn't parse the time from your input. Try 'Task on Dec 25 at 11am', 'Task tomorrow at 5pm', or 'Task in 5 minutes'.", true);
-                }
+            if (splitIndex !== -1) {
+                // Task is everything before the separator
+                text = input.substring(0, splitIndex).trim();
+                // Time phrase starts from the separator (e.g., "in 5 minutes")
+                timePhrase = input.substring(splitIndex).trim();
             } else {
-                setStatus("I couldn't parse that. Please use a clear format like 'Task on [date] at [time]' or 'Task in [duration]'.", true);
+                // If no separator is found, assume the whole input is complex and pass it to parser 
+                // (e.g., "Call John 5pm")
+                text = "Reminder"; // Default task name
+                timePhrase = input; 
+            }
+            
+            // If the task name is just a placeholder word like 'reminder', try to guess the task based on content.
+            if (text.toLowerCase() === 'reminder' && splitIndex !== -1) {
+                // If we split by, say, '5pm', the time phrase is '5pm', and the text is the reminder text.
+                text = input.substring(0, splitIndex).trim();
+            }
+            
+            // Fallback for simple task (e.g., if input was "5pm call mom"
+            // If the text is empty after trimming, the user likely entered time first.
+            if (text.length === 0) {
+                text = "Task"; 
+            }
+
+
+            // 3. Parse and Set Reminder
+            const time = parseReminderTime(timePhrase);
+            
+            if (time) {
+                addReminder(text, time);
+                REMINDER_INPUT.value = '';
+            } else {
+                // parseReminderTime already sets a status message on failure
             }
         }
 
@@ -722,7 +744,7 @@
             
             // 2. Set New Reminder (Voice Command)
             // Tries to match: "set a reminder for [task] (on|in|at) [time phrase]"
-            const match = lowerTranscript.match(/set a reminder for (.+?) (?:on|in|at) (.+)/);
+            const match = lowerTranscript.match(/set a reminder for (.+?) (?:on|in|at|by) (.+)/);
             
             if (match && match.length === 3) {
                 const text = match[1].trim();
