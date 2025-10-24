@@ -49,7 +49,7 @@
         
         <!-- Status Message Area -->
         <div id="status-message" class="p-3 text-sm text-center rounded-lg mb-6 transition-all duration-300 min-h-[40px] flex items-center justify-center bg-blue-100 text-blue-800 border border-blue-200">
-            Welcome! Click the microphone or type below to set reminders.
+            Welcome! This is the session-only version. Reminders will not be saved after closing the tab.
         </div>
 
         <!-- Microphone Input Area -->
@@ -72,7 +72,7 @@
         <hr class="my-8 border-gray-200">
 
         <!-- Reminder List -->
-        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upcoming Reminders</h2>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upcoming Reminders (Current Session Only)</h2>
         <div id="reminders-list" class="space-y-3">
             <!-- Reminders will be injected here -->
             <p id="no-reminders" class="text-center text-gray-500 p-4 bg-white rounded-lg shadow-md">No reminders set yet.</p>
@@ -110,11 +110,9 @@
     </div>
 
     <script>
-        // --- GLOBAL SETUP (NO FIREBASE) ---
-
-        const STORAGE_KEY = 'vocalReminders';
-        let reminders = [];
-        let recognition = null; // Speech Recognition API instance
+        // --- GLOBAL SETUP (NO STORAGE) ---
+        let reminders = []; // Session-only array
+        let recognition = null; 
 
         // --- DOM Elements ---
         const STATUS_MESSAGE = document.getElementById('status-message');
@@ -163,40 +161,10 @@
             }
         };
 
-        // --- Local Storage CRUD ---
+        // --- Reminder Management (Session Only) ---
 
         /**
-         * Loads reminders from local storage.
-         */
-        const loadReminders = () => {
-            try {
-                const stored = localStorage.getItem(STORAGE_KEY);
-                reminders = stored ? JSON.parse(stored) : [];
-                // Ensure reminders are sorted by timestamp for display
-                reminders.sort((a, b) => a.timestamp - b.timestamp); 
-                renderReminders();
-            } catch (e) {
-                console.error("Error loading from local storage:", e);
-                setStatus("Error loading previous reminders.", true);
-                reminders = [];
-            }
-        };
-
-        /**
-         * Saves the current reminder array to local storage.
-         */
-        const saveReminders = () => {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(reminders));
-                renderReminders();
-            } catch (e) {
-                console.error("Error saving to local storage:", e);
-                setStatus("Error saving reminders.", true);
-            }
-        };
-
-        /**
-         * Adds a new reminder to the local array and saves.
+         * Adds a new reminder to the local array and triggers a UI update.
          * @param {string} text Reminder text.
          * @param {number} timestamp Target timestamp in milliseconds.
          */
@@ -208,20 +176,20 @@
                 timestamp: timestamp,
                 createdAt: Date.now()
             });
+            // Keep sorted for display purposes
             reminders.sort((a, b) => a.timestamp - b.timestamp);
-            saveReminders();
+            renderReminders();
             setStatus(`Reminder set for: ${formatTime(timestamp)}`, false);
         };
 
         /**
-         * Deletes a reminder from the local array and saves.
+         * Deletes a reminder from the local array and triggers a UI update.
          * @param {string} id Unique ID of the reminder to delete.
          */
         const deleteReminder = (id) => {
             reminders = reminders.filter(r => r.id !== id);
-            saveReminders();
+            renderReminders();
         };
-
 
         // --- Core Logic: Time Parsing ---
 
@@ -264,7 +232,7 @@
                 }
                 
                 if (targetTime.getTime() > now.getTime()) {
-                    setStatus(`Parsed time: ${formatTime(targetTime)} (Relative to now).`, false);
+                    //setStatus(`Parsed time: ${formatTime(targetTime)} (Relative to now).`, false);
                     return targetTime.getTime();
                 }
             }
@@ -291,7 +259,7 @@
             }
 
             if (targetTime && targetTime.getTime() > now.getTime()) {
-                setStatus(`Parsed time: ${formatTime(targetTime)} (Specific date/time).`, false);
+                //setStatus(`Parsed time: ${formatTime(targetTime)} (Specific date/time).`, false);
                 return targetTime.getTime();
             }
 
@@ -308,7 +276,7 @@
         const renderReminders = () => {
             REMINDERS_LIST.innerHTML = '';
             
-            // Filter out old reminders (optional cleanup for display)
+            // Only show active reminders (those not yet triggered)
             const activeReminders = reminders.filter(r => r.timestamp > Date.now()); 
             
             if (activeReminders.length === 0) {
@@ -317,16 +285,13 @@
             }
 
             activeReminders.forEach(r => {
-                const now = Date.now();
-                const isPast = r.timestamp < now; // Although filtered, keep logic for edge cases
-
                 const reminderElement = document.createElement('div');
-                reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md ${isPast ? 'bg-gray-200 opacity-60' : 'bg-white hover:shadow-lg transition duration-150'}`;
+                reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md bg-white hover:shadow-lg transition duration-150`;
                 reminderElement.innerHTML = `
                     <div>
                         <p class="font-medium text-gray-800 break-words">${r.text}</p>
-                        <p class="text-xs ${isPast ? 'text-red-500 font-semibold' : 'text-indigo-500'} mt-1">
-                            ${isPast ? 'Past Due' : formatTime(r.timestamp)}
+                        <p class="text-xs text-indigo-500 mt-1">
+                            ${formatTime(r.timestamp)}
                         </p>
                     </div>
                     <button data-id="${r.id}" class="delete-btn text-gray-400 hover:text-red-600 ml-4 p-2 transition duration-150">
@@ -345,7 +310,38 @@
             });
         };
 
-        // --- Alarm and Snooze Logic ---
+        // --- Input Handling ---
+
+        /**
+         * Handles manual text input submission.
+         */
+        const handleManualSet = () => {
+            const inputContent = REMINDER_INPUT.value.trim();
+            if (!inputContent) { return; }
+
+            // Tries to match: "[task] (on|in|at) [time phrase]"
+            // This regex is crucial for parsing: (.+?)\s+(?:on|in|at)\s+(.+)
+            const match = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
+
+            if (match && match.length === 3) {
+                const text = match[1].trim();
+                const timePhrase = match[2].trim();
+                
+                // Keep the input text if time parsing fails, so user can easily correct the time.
+                REMINDER_INPUT.value = text + ' ' + timePhrase; 
+                
+                const time = parseReminderTime(timePhrase);
+                
+                if (time) {
+                    addReminder(text, time);
+                    REMINDER_INPUT.value = ''; // Clear only on successful addition
+                }
+            } else {
+                setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase]", true);
+            }
+        };
+
+        // --- Alarm and Snooze Logic (Simplified) ---
 
         let currentAlarmId = null;
         let utterance = null;
@@ -399,7 +395,6 @@
             const durationInMinutes = parseInt(SNOOZE_DURATION_SELECT.value, 10);
             const snoozeTime = Date.now() + (durationInMinutes * 60 * 1000);
             
-            // Find the reminder that triggered the alarm
             const reminderToSnooze = reminders.find(r => r.id === currentAlarmId);
 
             if (reminderToSnooze) {
@@ -427,43 +422,12 @@
         const mainLoop = () => {
             const now = Date.now();
             reminders.forEach(r => {
+                // Check if the reminder is due and not currently showing an alarm
                 if (r.timestamp < now && r.id !== currentAlarmId) {
                     showAlarm(r);
                 }
             });
         };
-
-        // --- Input Handling ---
-
-        /**
-         * Handles manual text input submission.
-         */
-        const handleManualSet = () => {
-            const inputContent = REMINDER_INPUT.value.trim();
-            if (!inputContent) { return; }
-
-            // Tries to match: "[task] (on|in|at) [time phrase]"
-            // Using \s+ for robust space matching around prepositions.
-            const match = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
-
-            if (match && match.length === 3) {
-                const text = match[1].trim();
-                const timePhrase = match[2].trim();
-                
-                // Keep the input text if time parsing fails, so user can easily correct the time.
-                REMINDER_INPUT.value = text + ' ' + timePhrase; 
-                
-                const time = parseReminderTime(timePhrase);
-                
-                if (time) {
-                    addReminder(text, time);
-                    REMINDER_INPUT.value = ''; // Clear only on successful addition
-                }
-            } else {
-                setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase]", true);
-            }
-        };
-
 
         // --- Speech Recognition ---
 
@@ -481,7 +445,6 @@
                     try {
                         recognition.start();
                     } catch (e) {
-                        // This prevents an error if recognition is already running
                         console.warn("Speech recognition already running or error starting:", e);
                     }
                 };
@@ -550,8 +513,7 @@
         // --- Initialization ---
 
         window.onload = () => {
-            loadReminders(); // Load existing reminders from local storage
-            
+            // Attach event listeners
             SET_MANUAL_BTN.onclick = handleManualSet;
             REMINDER_INPUT.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -559,10 +521,12 @@
                 }
             });
 
-            setInterval(mainLoop, 1000); // Check alarms every second
+            // Start the main loop to check for due alarms
+            setInterval(mainLoop, 1000);
 
+            // Initialize speech services
             if ('speechSynthesis' in window) {
-                window.speechSynthesis.getVoices(); // Populate voices early
+                window.speechSynthesis.getVoices(); 
             }
             setupSpeechRecognition();
         };
