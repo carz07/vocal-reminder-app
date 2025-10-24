@@ -728,7 +728,7 @@
                 }
             });
 
-            // Modal Button Listeners (Now targeting the inline buttons)
+            // CRITICAL: These listeners ensure the inline alert buttons work
             SNOOZE_BTN.onclick = (e) => {
                 const id = e.target.getAttribute('data-id');
                 const minutes = parseInt(e.target.getAttribute('data-snooze-minutes'), 10);
