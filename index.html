@@ -49,6 +49,11 @@
 
         <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">Vocal Reminders</h1>
         <p class="text-center text-sm text-gray-500 mb-6">Your voice-activated personal assistant.</p>
+        
+        <!-- User ID Display -->
+        <div id="user-id-display" class="text-xs text-gray-400 text-center mb-4 truncate" title="Your User ID">
+            Loading authentication...
+        </div>
 
         <!-- Status Display -->
         <div id="status-box" class="p-4 rounded-lg text-center font-medium bg-indigo-50 text-indigo-700 mb-6 border border-indigo-200 min-h-[5rem] flex items-center justify-center">
@@ -93,11 +98,38 @@
         <!-- Reminders List -->
         <h2 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Active Reminders</h2>
         <ul id="reminders-list" class="space-y-3">
-            <li class="text-gray-500 italic">No reminders set.</li>
+            <li class="text-gray-500 italic p-3">Loading reminders...</li>
         </ul>
     </div>
 
-    <script>
+    <script type="module">
+        // Firebase and User Configuration Globals
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "AIza-placeholder-key", authDomain: "placeholder.firebaseapp.com", projectId: "placeholder" };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Firebase Imports
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, setDoc, deleteDoc, doc, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // setLogLevel('debug'); // Uncomment for debugging
+
+        // Initialize Firebase services outside the function to avoid redeclaration error
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+
+        // Global state for app data and user info
+        let userId = null;
+        let isAuthReady = false;
+        let reminders = [];
+        let activeAlarm = null;
+        let recognition = null;
+        let alarmIntervalId = null;
+        let audioContext = null;
+
         // --- Core Application State & Constants ---
         const $ = (id) => document.getElementById(id);
         const STATUS_BOX = $('status-box');
@@ -106,12 +138,7 @@
         const REMINDERS_LIST = $('reminders-list');
         const REMINDER_INPUT = $('reminder-input');
         const SET_MANUAL_BTN = $('set-manual-btn');
-
-        let reminders = [];
-        let activeAlarm = null;
-        let recognition = null;
-        let alarmIntervalId = null;
-        let audioContext = null;
+        const USER_ID_DISPLAY = $('user-id-display');
 
         const MONTH_MAP = {
             'january': 0, 'jan': 0, 'february': 1, 'feb': 1, 'march': 2, 'mar': 2, 
@@ -282,43 +309,104 @@
             }
         }
 
-        // --- Reminder Logic ---
+        // --- Firebase Data Interaction ---
 
-        /** Adds a new reminder to the list. */
-        function addReminder(text, time) {
-            const id = Date.now();
-            reminders.push({ id, text, time, isActive: false, alarmTimeoutId: null });
-            
-            const timeOptions = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-            setStatus(`Reminder set for "${text}" on ${time.toLocaleDateString('en-US', timeOptions)}.`, true);
-            
-            renderReminders();
+        /** Gets the reference to the user's reminders collection. */
+        function getRemindersCollectionRef() {
+            if (!userId) return null;
+            // Private data storage path: /artifacts/{appId}/users/{userId}/reminders
+            return collection(db, 'artifacts', appId, 'users', userId, 'reminders');
         }
 
-        /** Clears a reminder by ID or by matching the text. */
-        function clearReminder(idOrText) {
-            const initialLength = reminders.length;
-
-            if (typeof idOrText === 'number') {
-                reminders = reminders.filter(r => r.id !== idOrText);
-            } else {
-                const text = idOrText.toLowerCase();
-                const index = reminders.findIndex(r => r.text.toLowerCase().includes(text));
-                if (index !== -1) {
-                    reminders.splice(index, 1);
-                }
+        /** Adds a new reminder to Firestore. */
+        async function addReminder(text, time) {
+            if (!isAuthReady) {
+                setStatus("System loading, please wait a moment.", true);
+                return;
             }
+            try {
+                const docId = crypto.randomUUID(); // Use UUID for document ID
+                await setDoc(doc(getRemindersCollectionRef(), docId), {
+                    text: text,
+                    time: Timestamp.fromDate(time), // Convert Date to Firestore Timestamp
+                    createdAt: Timestamp.now(),
+                    isActive: false, // Local UI state, but useful for persistence checks
+                    docId: docId // Store docId within the document for easy reference
+                });
 
-            if (reminders.length < initialLength) {
+                const timeOptions = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+                setStatus(`Reminder set for "${text}" on ${time.toLocaleDateString('en-US', timeOptions)}.`, true);
+            } catch (error) {
+                console.error("Error setting reminder:", error);
+                setStatus("Failed to set reminder due to a database error.", true);
+            }
+        }
+
+        /** Clears a reminder by its Firestore document ID. */
+        async function clearReminder(docId) {
+            if (!isAuthReady) {
+                setStatus("System loading, please wait a moment.", true);
+                return false;
+            }
+            try {
+                // Find the reminder locally to check if it's the active alarm
+                const reminder = reminders.find(r => r.docId === docId);
+
+                await deleteDoc(doc(getRemindersCollectionRef(), docId));
+                
                 setStatus("The reminder has been dismissed.", true);
-                renderReminders();
-                if (activeAlarm && (activeAlarm.id === idOrText || (typeof idOrText === 'string' && activeAlarm.text.toLowerCase().includes(idOrText.toLowerCase())))) {
+
+                if (activeAlarm && activeAlarm.docId === docId) {
                     stopAlarm();
                 }
+                // The renderReminders will be triggered by onSnapshot
                 return true;
+            } catch (error) {
+                console.error("Error deleting reminder:", error);
+                setStatus("Failed to dismiss reminder due to a database error.", true);
+                return false;
             }
-            return false;
         }
+
+        /** Snoozes the current active alarm for a specified duration in milliseconds by updating the time in Firestore. */
+        async function snoozeAlarm(durationMs = 5 * 60 * 1000) {
+            if (!activeAlarm || !isAuthReady) {
+                setStatus("There is no active alarm to snooze.", true);
+                return;
+            }
+            
+            const docId = activeAlarm.docId;
+            const newTime = new Date(Date.now() + durationMs);
+
+            try {
+                // Update the document in Firestore
+                await setDoc(doc(getRemindersCollectionRef(), docId), {
+                    time: Timestamp.fromDate(newTime),
+                    isActive: false // Deactivate locally until next trigger
+                }, { merge: true });
+
+                let displayDuration;
+                if (durationMs < 60000) {
+                    displayDuration = `${durationMs / 1000} seconds`;
+                } else if (durationMs < 3600000) {
+                    const minutes = Math.floor(durationMs / 60000);
+                    const seconds = Math.floor((durationMs % 60000) / 1000);
+                    displayDuration = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+                    if (seconds > 0) displayDuration += ` and ${seconds} second${seconds !== 1 ? 's' : ''}`;
+                } else {
+                    displayDuration = `${durationMs / 3600000} hours`;
+                }
+
+                setStatus(`Alarm snoozed for ${displayDuration}. New time is ${newTime.toLocaleTimeString()}.`, true);
+                stopAlarm();
+                // onSnapshot will handle the state update and re-render
+            } catch (error) {
+                console.error("Error snoozing alarm:", error);
+                setStatus("Failed to snooze alarm due to a database error.", true);
+            }
+        }
+
+        // --- Reminder Logic (Local) ---
 
         /** Triggers the alarm sequence for a reminder. */
         function triggerAlarm(reminder) {
@@ -329,7 +417,8 @@
             setStatus(`ALARM: Time for "${reminder.text}"! Say or type "Snooze" or "Dismiss."`, true);
 
             playAlarmSound();
-            reminder.isActive = true;
+            // Note: We don't save isActive state to Firestore unless snoozing/clearing
+            reminder.isActive = true; 
             renderReminders();
         }
 
@@ -337,7 +426,11 @@
         function stopAlarm() {
             if (activeAlarm) {
                 stopAlarmSound();
-                activeAlarm.isActive = false;
+                // Find the reminder in the array and set its local state to false
+                const localReminder = reminders.find(r => r.docId === activeAlarm.docId);
+                if (localReminder) {
+                    localReminder.isActive = false;
+                }
                 activeAlarm = null;
                 APP_CONTAINER.classList.remove('alarm-active');
                 renderReminders();
@@ -385,45 +478,12 @@
             }
         }
 
-
-        /** Snoozes the current active alarm for a specified duration in milliseconds. */
-        function snoozeAlarm(durationMs = 5 * 60 * 1000) {
-            if (!activeAlarm) {
-                setStatus("There is no active alarm to snooze.", true);
-                return;
-            }
-            const newTime = new Date(Date.now() + durationMs);
-
-            let displayDuration;
-            if (durationMs < 60000) {
-                displayDuration = `${durationMs / 1000} seconds`;
-            } else if (durationMs < 3600000) {
-                const minutes = Math.floor(durationMs / 60000);
-                const seconds = Math.floor((durationMs % 60000) / 1000);
-                
-                if (seconds > 0) {
-                    displayDuration = `${minutes} minute${minutes !== 1 ? 's' : ''} and ${seconds} second${seconds !== 1 ? 's' : ''}`;
-                } else {
-                     displayDuration = `${minutes} minute${minutes !== 1 ? 's' : ''}`;
-                }
-            } else {
-                displayDuration = `${durationMs / 3600000} hours`;
-            }
-
-
-            activeAlarm.time = newTime;
-            activeAlarm.isActive = false;
-            
-            setStatus(`Alarm snoozed for ${displayDuration}. New time is ${newTime.toLocaleTimeString()}.`, true);
-            stopAlarm();
-            renderReminders();
-        }
-
         /** Loop to check if any reminders are due. */
         function checkReminders() {
             const now = new Date();
             for (let reminder of reminders) {
-                if (!reminder.isActive && reminder.time <= now) {
+                // If it's not currently the active alarm, and the time has passed
+                if (!activeAlarm && reminder.time.getTime() <= now.getTime()) {
                     triggerAlarm(reminder);
                 }
             }
@@ -433,7 +493,7 @@
         function updateCountdowns() {
             const now = Date.now();
             for (const reminder of reminders) {
-                const countdownElement = $(`countdown-${reminder.id}`);
+                const countdownElement = $(`countdown-${reminder.docId}`);
                 
                 if (countdownElement) {
                     if (!reminder.isActive) { 
@@ -463,12 +523,16 @@
         
         // --- UI Action Handlers ---
 
-        /** Handles deletion triggered by the UI button. */
-        function deleteReminderUI(id) {
+        /** Handles deletion triggered by the UI button (using Firestore ID). */
+        function deleteReminderUI(docId) {
             setStatus("Deleting reminder.", true);
-            clearReminder(id);
+            clearReminder(docId);
         }
         
+        // Expose to global scope for use in onclick handlers in the dynamically generated HTML
+        window.deleteReminderUI = deleteReminderUI;
+
+
         /** Handles setting a reminder via the manual text input, including snooze/dismiss commands. */
         function handleManualSet() {
             const input = REMINDER_INPUT.value.trim();
@@ -502,7 +566,7 @@
             // 2. Dismiss Command
             if (lowerInput === 'dismiss') {
                 if (activeAlarm) {
-                    clearReminder(activeAlarm.id); 
+                    clearReminder(activeAlarm.docId); 
                     REMINDER_INPUT.value = '';
                     return;
                 } else {
@@ -539,10 +603,15 @@
                 return;
             }
 
+            reminders = reminders
+                .map(r => ({ ...r, time: new Date(r.time) })) // Ensure all times are Date objects
+                .sort((a, b) => a.time.getTime() - b.time.getTime());
+
             REMINDERS_LIST.innerHTML = reminders
-                .sort((a, b) => a.time - b.time)
                 .map(r => {
-                    const statusClass = r.isActive ? 'bg-red-100 text-red-800 border-red-400' : 'bg-white text-gray-800 border-gray-200';
+                    // Check if this is the currently ringing alarm
+                    const isActiveAlarm = activeAlarm && activeAlarm.docId === r.docId;
+                    const statusClass = isActiveAlarm ? 'bg-red-100 text-red-800 border-red-400' : 'bg-white text-gray-800 border-gray-200';
                     const timeOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
                     const timeString = r.time.toLocaleDateString('en-US', timeOptions);
 
@@ -550,14 +619,14 @@
                         <li class="p-3 rounded-lg flex justify-between items-center shadow-md transition-shadow border-2 ${statusClass}">
                             <div class="flex flex-col flex-grow min-w-0 pr-4">
                                 <span class="text-base font-semibold truncate">${r.text}</span>
-                                <span id="countdown-${r.id}" class="text-sm font-mono countdown-time mt-1">Calculating...</span>
+                                <span id="countdown-${r.docId}" class="text-sm font-mono countdown-time mt-1">Calculating...</span>
                             </div>
                             <div class="flex items-center space-x-3 flex-shrink-0">
                                 <!-- Original set time and date for reference -->
                                 <span class="text-xs text-gray-500 hidden sm:inline">@ ${timeString}</span>
                                 <button 
                                     class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition-colors"
-                                    onclick="deleteReminderUI(${r.id})"
+                                    onclick="deleteReminderUI('${r.docId}')"
                                     title="Delete Reminder"
                                 >
                                     <!-- Trash Icon -->
@@ -640,7 +709,7 @@
                     snoozeAlarm(durationMs);
                     return;
                 } else if (lowerTranscript.includes('dismiss') || lowerTranscript.includes('clear')) {
-                    clearReminder(activeAlarm.id);
+                    clearReminder(activeAlarm.docId);
                     return;
                 }
             }
@@ -666,7 +735,60 @@
 
         // --- Initialization ---
 
-        window.onload = () => {
+        async function initializeAuthAndData() {
+            // 1. Authenticate using onAuthStateChanged to ensure the user object is properly loaded
+            onAuthStateChanged(auth, async (user) => {
+                if (!user) {
+                    // Only attempt sign-in if the user is not yet loaded (initial state)
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken).catch(e => {
+                            console.error("Custom token sign-in failed, falling back to anonymous.", e);
+                            signInAnonymously(auth);
+                        });
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                }
+                
+                // Once the state is finalized (either new sign-in or existing user)
+                if (auth.currentUser) {
+                    userId = auth.currentUser.uid;
+                    USER_ID_DISPLAY.textContent = `User ID: ${userId}`;
+                    isAuthReady = true;
+
+                    // 2. Start Real-time Listener (after successful authentication)
+                    const remindersColRef = getRemindersCollectionRef();
+                    if (remindersColRef) {
+                        onSnapshot(remindersColRef, (snapshot) => {
+                            const newReminders = [];
+                            snapshot.forEach(doc => {
+                                const data = doc.data();
+                                newReminders.push({
+                                    docId: doc.id,
+                                    text: data.text,
+                                    // Convert Firestore Timestamp back to JavaScript Date object
+                                    time: data.time.toDate(),
+                                    isActive: activeAlarm && activeAlarm.docId === doc.id ? true : false, // Maintain local active state
+                                });
+                            });
+                            reminders = newReminders;
+                            renderReminders();
+                            
+                            // If no active alarm and we have reminders, ensure we check them immediately
+                            if (!activeAlarm && reminders.length > 0) {
+                                checkReminders();
+                            }
+                        }, (error) => {
+                            console.error("Firestore snapshot error:", error);
+                            setStatus("Error loading reminders. Check console for details.", true);
+                        });
+                    }
+                } else {
+                    setStatus("Could not authenticate. Reminders will not be saved.", true);
+                }
+            });
+
+            // 3. Setup UI and Loops
             SET_MANUAL_BTN.onclick = handleManualSet;
             REMINDER_INPUT.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -674,6 +796,7 @@
                 }
             });
 
+            // Start the periodic check and UI refresh loop
             setInterval(mainLoop, 1000); 
 
             if ('speechSynthesis' in window) {
@@ -682,7 +805,10 @@
             setupSpeechRecognition();
             setStatus("Welcome! Click the microphone or type below to set reminders, including specific dates.");
             renderReminders();
-        };
+        }
+
+        // Start the application initialization
+        initializeAuthAndData();
 
     </script>
 </body>
