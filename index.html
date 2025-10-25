@@ -462,34 +462,20 @@
             // Find the ID of the first reminder currently due
             const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
             
-            // --- 1. SNOOZE COMMAND (Manual Input) ---
-            // Updated regex to allow time phrase to be optional.
-            const snoozeMatch = lowerContent.match(/snooze\s*(?:for)?\s*(.*)/); 
-            if (snoozeMatch) {
+            // --- 1. DISMISS COMMAND (Manual Input) - HIGHEST PRIORITY ---
+            // Must be EXACTLY 'dismiss' or 'stop'
+            if (lowerContent === 'dismiss' || lowerContent === 'stop') {
                 commandHandled = true;
                 if (dueReminder) {
-                    const timePhrase = snoozeMatch[1].trim();
-                    
-                    // Default to 5 minutes snooze (to handle 'snooze' or 'snooze for' without a time)
-                    let delayMs = 5 * 60 * 1000; 
-
-                    if (timePhrase.length > 0) {
-                        const parsedDelay = parseSnoozeDelay(timePhrase);
-                        if (parsedDelay > 0) {
-                            delayMs = parsedDelay;
-                        }
-                        // If parsing fails, we stick to the default 5m to avoid an error state.
-                    }
-                    
-                    snoozeReminder(dueReminder.id, delayMs);
+                    dismissReminder(dueReminder.id);
                     REMINDER_INPUT.value = '';
                 } else {
-                    setStatus("No active reminder is currently due to snooze. The snooze command only applies to DUE reminders.", true);
+                    setStatus("The dismiss command only applies to a DUE reminder.", true);
                 }
             }
 
             // --- 2. DELETE COMMAND (Manual Input) ---
-            // Pattern: Must be EXACTLY 'delete' or 'delete it'
+            // Must be EXACTLY 'delete' or 'delete it'
             else if (lowerContent === 'delete' || lowerContent === 'delete it') {
                 commandHandled = true;
                 if (dueReminder) {
@@ -500,17 +486,33 @@
                 }
             }
             
-            // --- 3. DISMISS COMMAND (Manual Input) ---
-            // Pattern: Must be EXACTLY 'dismiss' or 'stop'
-            else if (lowerContent === 'dismiss' || lowerContent === 'stop') {
-                commandHandled = true;
-                if (dueReminder) {
-                    dismissReminder(dueReminder.id);
-                    REMINDER_INPUT.value = '';
-                } else {
-                    setStatus("The dismiss command only applies to a DUE reminder.", true);
+            // --- 3. SNOOZE COMMAND (Manual Input) - Must START with "snooze" ---
+            // Added ^ to enforce the command must start at the beginning of the input
+            else {
+                const snoozeMatch = lowerContent.match(/^snooze\s*(?:for)?\s*(.*)/); 
+                if (snoozeMatch) {
+                    commandHandled = true;
+                    if (dueReminder) {
+                        const timePhrase = snoozeMatch[1].trim();
+                        
+                        // Default to 5 minutes snooze
+                        let delayMs = 5 * 60 * 1000; 
+
+                        if (timePhrase.length > 0) {
+                            const parsedDelay = parseSnoozeDelay(timePhrase);
+                            if (parsedDelay > 0) {
+                                delayMs = parsedDelay;
+                            }
+                        }
+                        
+                        snoozeReminder(dueReminder.id, delayMs);
+                        REMINDER_INPUT.value = '';
+                    } else {
+                        setStatus("No active reminder is currently due to snooze. The snooze command only applies to DUE reminders.", true);
+                    }
                 }
             }
+
 
             // --- 4. NEW REMINDER COMMAND ---
             if (!commandHandled) {
@@ -597,8 +599,8 @@
             const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
 
             // 1. Snooze Command Pattern (Voice Command)
-            // Updated regex to allow time phrase to be optional.
-            const snoozeMatch = lowerTranscript.match(/snooze\s*(?:for)?\s*(.*)/);
+            // Must START with "snooze"
+            const snoozeMatch = lowerTranscript.match(/^snooze\s*(?:for)?\s*(.*)/);
             if (snoozeMatch) {
                 if (dueReminder) {
                     const timePhrase = snoozeMatch[1].trim(); 
