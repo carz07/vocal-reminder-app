@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vocal Reminder App</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght400;600;700&display=swap" rel="stylesheet">
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
@@ -76,12 +76,12 @@
 
         <!-- Manual Text Input -->
         <div class="text-input-group flex space-x-2">
-            <input type="text" id="reminder-input" placeholder='e.g., "Drink water in 5 seconds" or "snooze for 10 minutes"' class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm transition duration-150 ease-in-out" />
+            <input type="text" id="reminder-input" placeholder='e.g., "Drink water in 5 seconds" or "dismiss"' class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm transition duration-150 ease-in-out" />
             <button id="set-manual-btn" class="pen-button p-3 bg-white text-indigo-600 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | Delete: "delete"</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | **Dismiss: "dismiss"** | Delete: "delete"</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -163,7 +163,6 @@
                  parts.push(`${seconds}s`);
             }
             
-            // If parts are still empty but totalSeconds > 0 (shouldn't happen with the logic above, but as a safeguard)
             if (parts.length === 0 && totalSeconds > 0) {
                 return `${totalSeconds}s`; 
             }
@@ -185,7 +184,7 @@
             }
         };
 
-        // --- Snooze/Delete Logic ---
+        // --- Snooze/Delete/Dismiss Logic ---
 
         /**
          * Parses a relative time phrase (e.g., "5 more seconds", "2 hours") into milliseconds.
@@ -235,6 +234,22 @@
                 // Use formatExactDelay for status message confirmation
                 const confirmationDelay = formatExactDelay(delayMs); 
                 setStatus(`Reminder "${oldText}" snoozed! It will go off again in ${confirmationDelay}.`, false);
+            }
+        };
+
+        /**
+         * Dismisses a reminder's alert state without deleting the reminder.
+         */
+        const dismissReminder = (id) => {
+            const dismissedText = reminders.find(r => r.id === id)?.text || 'a reminder';
+            if (triggeredReminders.has(id)) {
+                triggeredReminders.delete(id);
+                renderReminders();
+                // Cancel any ongoing TTS speech
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                }
+                setStatus(`Reminder "${dismissedText}" dismissed. It remains in the list for reference.`, false);
             }
         };
 
@@ -339,6 +354,9 @@
                             <button data-id="${r.id}" class="snooze-btn-ui p-2 bg-yellow-400 text-yellow-900 rounded-lg text-xs font-semibold hover:bg-yellow-500 shadow-sm">
                                 Snooze (5m)
                             </button>
+                            <button data-id="${r.id}" class="dismiss-btn-ui p-2 bg-indigo-200 text-indigo-800 rounded-lg text-xs font-semibold hover:bg-indigo-300 shadow-sm">
+                                Dismiss
+                            </button>
                         ` : ''}
                         <button data-id="${r.id}" class="delete-btn text-gray-400 hover:text-red-600 p-2 transition duration-150">
                             <i class="fas fa-trash-alt"></i>
@@ -348,7 +366,7 @@
                 REMINDERS_LIST.appendChild(reminderElement);
             });
 
-            // Attach event listeners
+            // Attach event listeners for delete
             document.querySelectorAll('.delete-btn').forEach(button => {
                 button.onclick = (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
@@ -356,11 +374,20 @@
                 };
             });
             
+            // Attach event listeners for default snooze
             document.querySelectorAll('.snooze-btn-ui').forEach(button => {
                 button.onclick = (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
                     // Default snooze is 5 minutes (300,000 milliseconds)
                     snoozeReminder(id, 5 * 60 * 1000); 
+                };
+            });
+
+            // Attach event listeners for dismiss
+            document.querySelectorAll('.dismiss-btn-ui').forEach(button => {
+                button.onclick = (e) => {
+                    const id = e.currentTarget.getAttribute('data-id');
+                    dismissReminder(id);
                 };
             });
         };
@@ -397,7 +424,7 @@
                     triggeredReminders.add(r.id);
                     newAlarmTriggered = true;
                     
-                    setStatus(`ALERT: "${r.text}" is DUE NOW! Use the snooze/delete buttons or type a command.`, true);
+                    setStatus(`ALERT: "${r.text}" is DUE NOW! Use the snooze/delete/dismiss buttons or type a command.`, true);
 
                     // Announce it via TTS once (no modal)
                     if ('speechSynthesis' in window) {
@@ -415,7 +442,7 @@
                     MAIN_CONTAINER.classList.remove('shaking');
                 }, 400); // Remove after animation completes (0.2s * 2)
 
-                // Re-render to show the snooze button and red style
+                // Re-render to show the snooze and dismiss buttons and red style
                 renderReminders(); 
             }
         };
@@ -466,8 +493,16 @@
                     setStatus("No active reminder is currently due to delete. Please use the trash can icon next to a non-due reminder.", true);
                 }
             }
+            
+            // --- 3. DISMISS COMMAND (Manual Input) ---
+            // Pattern: "dismissed", "dismiss", "stop" (targets the DUE reminder)
+            else if (dueReminder && (lowerContent.includes('dismiss') || lowerContent.includes('stop'))) {
+                commandHandled = true;
+                dismissReminder(dueReminder.id);
+                REMINDER_INPUT.value = '';
+            }
 
-            // --- 3. NEW REMINDER COMMAND ---
+            // --- 4. NEW REMINDER COMMAND ---
             if (!commandHandled) {
                 // Regex for NEW reminder: [task] (on/in/at) [time phrase]
                 const newReminderMatch = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
@@ -481,10 +516,14 @@
                     if (time) {
                         addReminder(text, time);
                         REMINDER_INPUT.value = ''; 
+                        commandHandled = true; // Set handled since a new reminder was successfully set
                     }
-                } else {
-                    // This is the error message for manual input failure.
-                    setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase] for setting a new reminder.", true);
+                } 
+                
+                // If it wasn't handled and fell through to here, show a generic error
+                if (!commandHandled) {
+                    // Updated error message to be more helpful
+                    setStatus("Could not understand the input. Commands are: 'snooze', 'delete', 'dismiss' (when due), or [Task] [Time Phrase] (to set a new one).", true);
                 }
             }
         };
@@ -512,7 +551,7 @@
                 recognition.onstart = () => {
                     MIC_BUTTON.classList.add('listening');
                     MIC_STATUS.textContent = "Listening...";
-                    setStatus("Say: 'Set a reminder...' or 'Snooze for 5 minutes'.", false);
+                    setStatus("Say: 'Set a reminder...' or 'Snooze for 5 minutes' or 'Dismiss'.", false);
                 };
 
                 recognition.onresult = (event) => {
@@ -549,7 +588,6 @@
 
             // 1. Snooze Command Pattern (Voice Command)
             const snoozeMatch = lowerTranscript.match(/snooze (?:for)?\s*(.+)/);
-
             if (snoozeMatch) {
                 if (dueReminder) {
                     const timePhrase = snoozeMatch[1].trim();
@@ -559,7 +597,6 @@
                         snoozeReminder(dueReminder.id, delayMs);
                         return; // Command handled
                     } else {
-                        // Custom error for failed snooze time parsing
                         setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}". Please try "5 minutes" or "10 seconds".`, true);
                         return;
                     }
@@ -579,8 +616,19 @@
                     return;
                 }
             }
+
+            // 3. Dismiss Command Pattern (Voice Command)
+            if (lowerTranscript.includes('dismiss') || lowerTranscript.includes('stop')) {
+                 if (dueReminder) {
+                    dismissReminder(dueReminder.id);
+                    return;
+                } else {
+                    setStatus("The dismiss command only applies to DUE reminders.", true);
+                    return;
+                }
+            }
             
-            // 3. Main Reminder Pattern (New Reminder)
+            // 4. Main Reminder Pattern (New Reminder)
             const newReminderMatch = lowerTranscript.match(/(?:set a reminder for|remind me to) (.+?) (?:on|in|at) (.+)/);
             
             if (newReminderMatch && newReminderMatch.length >= 3) {
@@ -596,8 +644,8 @@
                 return; // Command handled
             }
 
-            // 4. Fallback for Unmatched Commands
-            setStatus(`I heard "${transcript}" but I couldn't process it. Try: "Remind me to call Mom in 1 hour" or "Snooze for 5 minutes."`, true);
+            // 5. Fallback for Unmatched Commands
+            setStatus(`I heard "${transcript}" but I couldn't process it. Try: "Remind me to call Mom in 1 hour" or "Dismiss."`, true);
         };
 
 
