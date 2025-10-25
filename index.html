@@ -100,6 +100,7 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             transition: all 0.2s ease-in-out;
         }
+        /* Alerting Styles */
         .reminder-alerting {
             background-color: #fee2e2; /* Light Red */
             border-left-color: #e53e3e; /* Darker Red */
@@ -208,8 +209,8 @@
             phrase = phrase.trim().toLowerCase();
             if (!phrase) return null;
 
-            // Remove common noise words for relative time (e.g., "for", "more")
-            const relaxedPhrase = phrase.replace(/^(for|in|more)\s+/, '').trim();
+            // FIX: Remove common noise words, including "more" and extra spaces
+            const relaxedPhrase = phrase.replace(/^(for|in|more)\s+/, '').replace(/\s+more\s+/, ' ').trim();
             
             // Regex for relative time: (Number) (Unit)
             const relativeMatch = relaxedPhrase.match(/^(\d+)\s*(s|sec|seconds|m|min|minutes|h|hr|hours|d|day|days)$/i);
@@ -305,7 +306,15 @@
 
             if (!snoozeTime) {
                 log(`Error: Could not parse snooze time "${timePhrase}". Using default 5 minutes.`);
-                return handleSnooze(id, 'snooze 5 minutes'); // Recursive call to use default
+                // If parsing fails for a complex phrase, try falling back to simple default, then exit.
+                const defaultSnooze = parseTimePhrase('5 minutes', now);
+                 if (defaultSnooze) {
+                    reminder.targetTime = defaultSnooze.getTime();
+                    reminder.isAlerting = false;
+                    log(`Reminder "${reminder.task}" snoozed. New alert: ${formatTime(defaultSnooze)}. (Used default 5 mins)`);
+                    renderReminders();
+                }
+                return;
             }
 
             reminder.targetTime = snoozeTime.getTime();
