@@ -3,117 +3,139 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Natural Language Reminder App</title>
+    <title>Vocal & Manual Reminder App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7f9fb;
+            background-color: #f0f4f8;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
         }
-        .container-card {
-            max-width: 500px;
-            margin: 2rem auto;
-            padding: 1.5rem;
+        .app-container {
+            width: 100%;
+            max-width: 550px;
+            margin-top: 3rem;
             background: white;
-            border-radius: 1rem;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 0 10px -5px rgba(0, 0, 0, 0.04);
-            transition: all 0.3s ease;
+            border-radius: 1.5rem;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+        }
+        .mic-button {
+            width: 80px;
+            height: 80px;
+            background-color: #5a67d8; /* Indigo/Purple */
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 1.5rem auto;
+            cursor: pointer;
+            box-shadow: 0 8px 15px rgba(90, 103, 216, 0.5);
+            transition: all 0.2s ease;
+        }
+        .mic-button:hover {
+            background-color: #4c51bf;
+            transform: scale(1.05);
+        }
+        .mic-icon {
+            width: 40px;
+            height: 40px;
         }
         .input-group {
             display: flex;
             gap: 0.5rem;
+            align-items: center;
         }
         .input-field {
             flex-grow: 1;
             padding: 0.75rem 1rem;
-            border: 2px solid #e5e7eb;
+            border: 2px solid #e2e8f0;
             border-radius: 0.75rem;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
         .input-field:focus {
             outline: none;
-            border-color: #4f46e5;
+            border-color: #5a67d8;
+            box-shadow: 0 0 0 2px rgba(90, 103, 216, 0.2);
         }
-        .send-button {
-            background-color: #4f46e5;
+        .set-button {
+            background-color: #48bb78; /* Green */
             color: white;
             border-radius: 0.75rem;
-            padding: 0.75rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
             transition: background-color 0.2s, transform 0.1s;
         }
-        .send-button:hover {
-            background-color: #4338ca;
+        .set-button:hover {
+            background-color: #38a169;
         }
-        .send-button:active {
+        .set-button:active {
             transform: scale(0.98);
         }
+        .log-box {
+            background-color: #f7fafc;
+            color: #4a5568;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+            border-radius: 0.75rem;
+            border: 1px solid #e2e8f0;
+        }
         .reminder-item {
-            background-color: #f3f4f6;
-            border-left: 5px solid #4f46e5;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border-left: 5px solid #5a67d8;
+            background-color: #f7fafc;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             transition: all 0.2s ease-in-out;
         }
         .reminder-alerting {
-            background-color: #fee2e2;
-            border-left-color: #ef4444;
+            background-color: #fee2e2; /* Light Red */
+            border-left-color: #e53e3e; /* Darker Red */
             animation: pulse-ring 1s infinite;
         }
         @keyframes pulse-ring {
             0%, 100% {
-                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+                box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.4);
             }
             50% {
-                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+                box-shadow: 0 0 0 8px rgba(229, 62, 62, 0);
             }
-        }
-        .log-box {
-            background-color: #1f2937;
-            color: #d1d5db;
-            font-family: monospace;
-            white-space: pre-wrap;
-            word-break: break-all;
-            border-radius: 0.5rem;
-        }
-        /* Custom SVG for the Pen Icon */
-        .pen-icon {
-            width: 24px;
-            height: 24px;
         }
     </style>
 </head>
-<body class="p-4">
+<body>
 
-    <div class="container-card">
-        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Natural Language Reminders</h1>
-        <p class="text-gray-500 mb-6">Type commands to set, snooze, dismiss, or delete tasks.</p>
+    <div class="app-container">
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-6">Vocal & Manual Reminder App</h1>
 
-        <div class="mb-6">
-            <h2 class="text-lg font-semibold text-gray-800 mb-2">Commands:</h2>
-            <ul class="text-sm text-gray-600 space-y-1 ml-4 list-disc">
-                <li>**Set**: `[Task]` **on/in/at** `[Time Phrase]` (e.g., `check email in 5m`)</li>
-                <li>**Snooze (when alerting)**: `snooze` or `snooze for 5 minutes`</li>
-                <li>**Dismiss (when alerting)**: `dismiss`</li>
-                <li>**Delete (when alerting)**: `delete`</li>
-            </ul>
+        <!-- Microphone Button Area -->
+        <div class="text-center">
+            <button id="micButton" class="mic-button" title="Type commands below">
+                <!-- Microphone SVG Icon (restored) -->
+                <svg class="mic-icon" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 14c1.66 0 2.99-1.34 2.99-3L15 5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3.01-2.49 5.1-5.3 5.1S6.7 14.01 6.7 11H5c0 3.53 2.61 6.43 6 7v3h2v-3c3.39-.57 6-3.47 6-7h-1.7z"/>
+                </svg>
+            </button>
+            <p id="micStatus" class="text-sm text-gray-500 mb-4">Click to mimic starting a vocal input (Type commands below).</p>
         </div>
 
         <div class="input-group mb-4">
-            <input type="text" id="commandInput" class="input-field" placeholder="e.g., remind me to drink water in 10s">
-            <button id="sendButton" class="send-button">
-                <svg class="pen-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                </svg>
-            </button>
+            <input type="text" id="commandInput" class="input-field" placeholder="e.g., Pay bills next Tuesday at 9:00 AM or dismiss">
+            <button id="sendButton" class="set-button">Set Reminder</button>
         </div>
 
-        <div id="outputLog" class="log-box p-3 mb-6 h-32 overflow-y-auto text-xs">
+        <div id="outputLog" class="log-box p-3 mb-6 h-28 overflow-y-auto text-xs">
             System ready. Type a command to begin.
         </div>
 
-        <h2 class="text-xl font-bold text-gray-900 mb-3">Active Reminders (<span id="reminderCount">0</span>)</h2>
+        <h2 class="text-xl font-bold text-gray-900 mb-3">Pending Reminders (<span id="reminderCount">0</span>)</h2>
         <div id="reminderListContainer" class="space-y-3">
             <!-- Reminder items will be injected here -->
         </div>
@@ -126,21 +148,19 @@
         
         // --- Utility Functions ---
 
-        // Simple ID generator
         function generateId() {
             return `r-${reminderIdCounter++}`;
         }
 
-        // Logs messages to the output log box
         function log(message) {
             const logElement = document.getElementById('outputLog');
             logElement.innerHTML += `> ${message}\n`;
             logElement.scrollTop = logElement.scrollHeight;
         }
 
-        // Function to play a short beep
         function playAlertSound() {
             try {
+                // Generates a short tone for alert feedback
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioCtx.createOscillator();
                 const gainNode = audioCtx.createGain();
@@ -151,36 +171,34 @@
                 oscillator.type = 'square';
                 oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); 
                 gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
-
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
 
                 oscillator.start();
                 oscillator.stop(audioCtx.currentTime + 0.3);
             } catch (e) {
                 console.error("Audio playback error:", e);
-                // Non-critical, just log the error
             }
         }
         
-        // Finds the closest timestamp in the input to start parsing
+        // Finds the time keyword (' in ', ' at ', ' on ') to split task from time
         function findTimeKeywordIndex(text) {
-            const keywords = [' on ', ' in ', ' at '];
+            const keywords = [' in ', ' at ', ' on '];
             for (const keyword of keywords) {
-                // Use lastIndexOf to ensure we capture the time phrase at the end
                 const index = text.toLowerCase().lastIndexOf(keyword);
                 if (index !== -1) {
-                    return index + keyword.length - 1; // Position right after the keyword
+                    // Return the index right after the keyword (e.g., after ' in ')
+                    return index + keyword.length; 
                 }
             }
             return -1;
         }
         
-        // Converts a time phrase (e.g., "5 minutes" or "5s") into a Date object
+        // Parses a time phrase (e.g., "5 seconds", "10m", "for 5 min") into a Date object
         function parseTimePhrase(phrase, baseDate = new Date()) {
             phrase = phrase.trim().toLowerCase();
             if (!phrase) return null;
 
-            // CRITICAL FIX: Handle variations like "for 5 minutes", "5 more seconds", or just "5s"
+            // Remove common noise words for relative time (e.g., "for", "more")
             const relaxedPhrase = phrase.replace(/^(for|in|more)\s+/, '').trim();
             
             // Regex for relative time: (Number) (Unit)
@@ -199,14 +217,14 @@
                 return newDate;
             }
             
+            // NOTE: Full calendar parsing (like "next monday") is excluded for stability
             return null;
         }
         
-        // Formats the Date object into a readable string
+        // Formats the Date object into a readable time until it's due
         function formatTime(date) {
             if (!date) return 'N/A';
-            const now = new Date();
-            const timeDifference = date.getTime() - now.getTime();
+            const timeDifference = date.getTime() - Date.now();
             
             if (timeDifference < 0) return 'Past Due';
 
@@ -225,22 +243,19 @@
 
         // --- Reminder Actions ---
 
-        // Adds or updates a reminder
         function handleSetTask(input) {
-            // Check for a time keyword surrounded by spaces for better separation
             const timeIndex = findTimeKeywordIndex(input); 
             if (timeIndex === -1) {
-                log('Error: Could not find a time keyword (on, in, at). Command format must be: [Task] in [Time].');
+                log('Error: Could not find a time keyword (on, in, at). Please rephrase the command.');
                 return;
             }
 
-            const keyword = input.substring(timeIndex - 2, timeIndex + 1); // e.g., ' in '
-            const taskDescription = input.substring(0, timeIndex - keyword.length + 1).trim();
-            const timePhrase = input.substring(timeIndex + 1).trim();
+            const taskDescription = input.substring(0, timeIndex - 3).trim(); // -3 to remove ' in ' or ' at '
+            const timePhrase = input.substring(timeIndex).trim();
             const targetDate = parseTimePhrase(timePhrase);
 
             if (!targetDate) {
-                log(`Error: Could not parse time phrase "${timePhrase}". Please use simple relative time (e.g., 5s, 10m, 1h).`);
+                log(`Error: Could not parse time phrase "${timePhrase}". Please use simple relative time (e.g., 5s, 10m).`);
                 return;
             }
 
@@ -267,21 +282,20 @@
             const reminder = reminderList.find(r => r.id === id);
             if (!reminder) return;
 
-            // Extract time phrase after "snooze"
+            // Extract time phrase after 'snooze'
             let timePhrase = input.toLowerCase().replace('snooze', '').trim();
             
-            // If the remaining phrase is empty or just prepositions, use default
-            if (!timePhrase || timePhrase === 'for' || timePhrase === 'in') {
+            // If the phrase is empty, use default 5 minutes
+            if (!timePhrase || timePhrase.length < 2) {
                 timePhrase = '5 minutes'; 
             }
             
-            // Allow full commands like "snooze for 5 minutes" or simple "5 minutes"
             const now = new Date();
             const snoozeTime = parseTimePhrase(timePhrase, now);
 
             if (!snoozeTime) {
                 log(`Error: Could not parse snooze time "${timePhrase}". Using default 5 minutes.`);
-                return handleSnooze(id, '5 minutes'); // Retry with default
+                return handleSnooze(id, 'snooze 5 minutes'); // Recursive call to use default
             }
 
             reminder.targetTime = snoozeTime.getTime();
@@ -290,7 +304,6 @@
             const timeStr = formatTime(snoozeTime);
             log(`Reminder "${reminder.task}" snoozed. New alert: ${timeStr}.`);
             renderReminders();
-            // We call this to stop the continuous sound from the main loop
         }
 
         function handleDismiss(id) {
@@ -298,7 +311,7 @@
             if (reminder) {
                 reminder.isDismissed = true;
                 reminder.isAlerting = false;
-                log(`Reminder "${reminder.task}" dismissed. It remains in the list for reference.`);
+                log(`Reminder "${reminder.task}" dismissed.`);
                 renderReminders();
             }
         }
@@ -306,6 +319,7 @@
         function handleDelete(id) {
             const reminder = reminderList.find(r => r.id === id);
             if (reminder) {
+                // Instead of deleting, we mark it deleted and filter it out later
                 reminder.isDeleted = true;
                 reminder.isAlerting = false;
                 log(`Reminder "${reminder.task}" permanently deleted.`);
@@ -321,36 +335,27 @@
             if (!input) return;
             
             const normalizedInput = input.toLowerCase();
-
-            // 1. Find the currently alerting item (if any)
             const alertingItem = reminderList.find(r => r.isAlerting);
 
-            // --- CRITICAL FIX: Prioritize Alert Handling Commands (highest priority) ---
+            // 1. --- ALERT HANDLING PRIORITY (The Fix) ---
             if (alertingItem) {
-                // A. Check for exact match for dismiss and delete
                 if (normalizedInput === 'dismiss') {
                     handleDismiss(alertingItem.id);
-                    return; // STOP EXECUTION
+                    return; 
                 }
                 
                 if (normalizedInput === 'delete') {
                     handleDelete(alertingItem.id);
-                    return; // STOP EXECUTION
+                    return; 
                 }
                 
-                // B. Check for snooze (must start with 'snooze')
                 if (normalizedInput.startsWith('snooze')) {
-                    // Pass the whole input string to handleSnooze for proper parsing
                     handleSnooze(alertingItem.id, input);
-                    return; // STOP EXECUTION
+                    return; 
                 }
-
-                // If an item is alerting but the input is none of the alert commands,
-                // we fall through to the new task setting logic.
             }
-            // --- End CRITICAL FIX Block ---
             
-            // 2. If no alert command was processed, treat it as a new task command.
+            // 2. --- NEW TASK SETTING ---
             handleSetTask(input);
         }
 
@@ -358,9 +363,9 @@
 
         function renderReminders() {
             const container = document.getElementById('reminderListContainer');
-            const countElement = document.getElementById('reminderCount');
             
-            const activeReminders = reminderList.filter(r => !r.isDeleted);
+            // Only show items that are not deleted
+            const activeReminders = reminderList.filter(r => !r.isDeleted); 
             
             container.innerHTML = activeReminders.map(r => {
                 const isPastDue = r.targetTime < Date.now();
@@ -370,7 +375,7 @@
                 let statusColor;
 
                 if (r.isDismissed) {
-                    timeText = 'DISMISSED';
+                    timeText = 'Dismissed';
                     statusColor = 'text-gray-400';
                 } else if (r.isAlerting) {
                     timeText = 'ALERTING NOW!';
@@ -384,33 +389,30 @@
                 }
                 
                 return `
-                    <div class="reminder-item p-4 rounded-lg flex justify-between items-center ${isAlertingClass}">
+                    <div class="reminder-item p-4 flex justify-between items-center ${isAlertingClass}">
                         <div class="flex-grow">
                             <p class="font-semibold text-gray-800">${r.task}</p>
-                            <p class="text-sm ${statusColor}">Status: ${timeText}</p>
+                            <p class="text-sm ${statusColor}">${timeText}</p>
                         </div>
                     </div>
                 `;
             }).join('');
 
-            countElement.textContent = activeReminders.length;
+            document.getElementById('reminderCount').textContent = activeReminders.length;
         }
 
         // --- Main Loop and Event Listeners ---
 
-        // The main check loop runs every second
         function checkReminders() {
             const now = Date.now();
             let shouldPlaySound = false;
 
             reminderList.forEach(r => {
-                // If it's time and not already alerting, dismissed, or deleted, set to alerting
                 if (!r.isDismissed && !r.isDeleted && !r.isAlerting && r.targetTime <= now) {
                     r.isAlerting = true;
-                    log(`ALERT: "${r.task}" is due! Type 'dismiss', 'delete', or 'snooze for [time]'.`);
+                    log(`ALERT: "${r.task}" is due! Respond with 'dismiss', 'delete', or 'snooze for [time]'.`);
                 }
                 
-                // If any item is alerting, we need to play the sound
                 if (r.isAlerting) {
                     shouldPlaySound = true;
                 }
@@ -423,24 +425,34 @@
             renderReminders();
         }
 
-        // Initialize and bind events
         document.addEventListener('DOMContentLoaded', () => {
+            // Send button handler
             document.getElementById('sendButton').addEventListener('click', () => {
                 const input = document.getElementById('commandInput').value;
                 handleInput(input);
             });
 
+            // Enter key handler
             document.getElementById('commandInput').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     const input = document.getElementById('commandInput').value;
                     handleInput(input);
                 }
             });
+            
+            // Microphone button (cosmetic) handler
+            document.getElementById('micButton').addEventListener('click', () => {
+                 log("Vocal input started (type your command).");
+                 document.getElementById('micStatus').textContent = 'Listening... Type your command and hit "Set Reminder".';
+                 // Reset after a short delay to mimic a recording timeout
+                 setTimeout(() => {
+                    document.getElementById('micStatus').textContent = 'Click to mimic starting a vocal input (Type commands below).';
+                 }, 3000);
+            });
+
 
             // Start the check loop
             setInterval(checkReminders, 1000);
-            
-            // No need to init synth on click since playAlertSound handles it internally
         });
     </script>
 </body>
