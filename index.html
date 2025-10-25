@@ -81,7 +81,7 @@
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | Dismiss: "**dismiss**" | Delete: "**delete**"</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "**snooze**" or "**snooze for 5s**" | Dismiss: "**dismiss**" | Delete: "**delete**"</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -463,20 +463,26 @@
             const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
             
             // --- 1. SNOOZE COMMAND (Manual Input) ---
-            // Pattern: "snooze (for) [time phrase]"
-            const snoozeMatch = lowerContent.match(/snooze (?:for)?\s*(.+)/);
+            // Updated regex to allow time phrase to be optional.
+            const snoozeMatch = lowerContent.match(/snooze\s*(?:for)?\s*(.*)/); 
             if (snoozeMatch) {
                 commandHandled = true;
                 if (dueReminder) {
                     const timePhrase = snoozeMatch[1].trim();
-                    const delayMs = parseSnoozeDelay(timePhrase); 
+                    
+                    // Default to 5 minutes snooze (to handle 'snooze' or 'snooze for' without a time)
+                    let delayMs = 5 * 60 * 1000; 
 
-                    if (delayMs > 0) {
-                        snoozeReminder(dueReminder.id, delayMs);
-                        REMINDER_INPUT.value = '';
-                    } else {
-                        setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}". Try "5 minutes" or "10 seconds".`, true);
+                    if (timePhrase.length > 0) {
+                        const parsedDelay = parseSnoozeDelay(timePhrase);
+                        if (parsedDelay > 0) {
+                            delayMs = parsedDelay;
+                        }
+                        // If parsing fails, we stick to the default 5m to avoid an error state.
                     }
+                    
+                    snoozeReminder(dueReminder.id, delayMs);
+                    REMINDER_INPUT.value = '';
                 } else {
                     setStatus("No active reminder is currently due to snooze. The snooze command only applies to DUE reminders.", true);
                 }
@@ -591,19 +597,24 @@
             const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
 
             // 1. Snooze Command Pattern (Voice Command)
-            const snoozeMatch = lowerTranscript.match(/snooze (?:for)?\s*(.+)/);
+            // Updated regex to allow time phrase to be optional.
+            const snoozeMatch = lowerTranscript.match(/snooze\s*(?:for)?\s*(.*)/);
             if (snoozeMatch) {
                 if (dueReminder) {
-                    const timePhrase = snoozeMatch[1].trim();
-                    const delayMs = parseSnoozeDelay(timePhrase); 
+                    const timePhrase = snoozeMatch[1].trim(); 
+                    
+                    // Default to 5 minutes snooze
+                    let delayMs = 5 * 60 * 1000; 
 
-                    if (delayMs > 0) {
-                        snoozeReminder(dueReminder.id, delayMs);
-                        return; // Command handled
-                    } else {
-                        setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}". Please try "5 minutes" or "10 seconds".`, true);
-                        return;
+                    if (timePhrase.length > 0) {
+                        const parsedDelay = parseSnoozeDelay(timePhrase);
+                        if (parsedDelay > 0) {
+                            delayMs = parsedDelay;
+                        }
                     }
+                    
+                    snoozeReminder(dueReminder.id, delayMs);
+                    return; // Command handled
                 } else {
                     setStatus("No active reminder is currently due to snooze.", true);
                     return; // Command handled, but nothing to snooze
