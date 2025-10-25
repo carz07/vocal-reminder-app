@@ -81,7 +81,7 @@
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5m" | Delete: "delete"</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | Delete: "delete"</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -137,6 +137,40 @@
 
             return parts.slice(0, 3).join(' ');
         };
+        
+        /**
+         * Converts a millisecond delay into a short, exact human-readable string (e.g., "5s", "5m 30s").
+         * This is used for confirmation messages.
+         */
+        const formatExactDelay = (delayMs) => {
+            const totalSeconds = Math.floor(delayMs / 1000);
+            if (totalSeconds <= 0) return "momentarily";
+
+            const days = Math.floor(totalSeconds / (3600 * 24));
+            const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+
+            const parts = [];
+            if (days > 0) parts.push(`${days}d`);
+            if (hours > 0) parts.push(`${hours}h`);
+            if (minutes > 0) parts.push(`${minutes}m`);
+            
+            // Prioritize seconds for short delays or if no other units are present
+            if (totalSeconds < 60 && seconds > 0) {
+                 parts.push(`${seconds}s`);
+            } else if (parts.length === 0 && seconds > 0) {
+                 parts.push(`${seconds}s`);
+            }
+            
+            // If parts are still empty but totalSeconds > 0 (shouldn't happen with the logic above, but as a safeguard)
+            if (parts.length === 0 && totalSeconds > 0) {
+                return `${totalSeconds}s`; 
+            }
+
+            return parts.slice(0, 3).join(' ');
+        };
+
 
         /**
          * Displays a status message to the user.
@@ -197,7 +231,10 @@
                 // Re-sort and re-render
                 reminders.sort((a, b) => a.timestamp - b.timestamp);
                 renderReminders();
-                setStatus(`Reminder "${oldText}" snoozed! It will go off again in ${formatTimeRemaining(newTimestamp)}.`, false);
+                
+                // Use formatExactDelay for status message confirmation
+                const confirmationDelay = formatExactDelay(delayMs); 
+                setStatus(`Reminder "${oldText}" snoozed! It will go off again in ${confirmationDelay}.`, false);
             }
         };
 
