@@ -76,12 +76,12 @@
 
         <!-- Manual Text Input -->
         <div class="text-input-group flex space-x-2">
-            <input type="text" id="reminder-input" placeholder='e.g., "Drink water in 5 seconds"' class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm transition duration-150 ease-in-out" />
+            <input type="text" id="reminder-input" placeholder='e.g., "Drink water in 5 seconds" or "snooze for 10 minutes"' class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-sm transition duration-150 ease-in-out" />
             <button id="set-manual-btn" class="pen-button p-3 bg-white text-indigo-600 border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Use format: [Task] [on/in/at] [Time Phrase] **for new reminders only**.</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5m" | Delete: "delete"</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -151,7 +151,7 @@
             }
         };
 
-        // --- Snooze Logic ---
+        // --- Snooze/Delete Logic ---
 
         /**
          * Parses a relative time phrase (e.g., "5 more seconds", "2 hours") into milliseconds.
@@ -188,6 +188,7 @@
             const index = reminders.findIndex(r => r.id === id);
             if (index !== -1) {
                 const newTimestamp = Date.now() + delayMs;
+                const oldText = reminders[index].text;
                 reminders[index].timestamp = newTimestamp;
                 
                 // Clear the triggered flag so it can go off again
@@ -196,7 +197,7 @@
                 // Re-sort and re-render
                 reminders.sort((a, b) => a.timestamp - b.timestamp);
                 renderReminders();
-                setStatus(`Reminder snoozed! It will go off again in ${formatTimeRemaining(newTimestamp)}.`, false);
+                setStatus(`Reminder "${oldText}" snoozed! It will go off again in ${formatTimeRemaining(newTimestamp)}.`, false);
             }
         };
 
@@ -216,9 +217,11 @@
         };
 
         const deleteReminder = (id) => {
+            const deletedText = reminders.find(r => r.id === id)?.text || 'a reminder';
             reminders = reminders.filter(r => r.id !== id);
             triggeredReminders.delete(id); 
             renderReminders();
+            setStatus(`"${deletedText}" reminder deleted.`, false);
         };
 
         // --- Core Logic: Time Parsing ---
@@ -259,7 +262,7 @@
                 // Ignore date parsing errors
             }
 
-            setStatus(`Couldn't understand the time phrase "${phrase}". Please use relative time (e.g., '5 minutes') or specific time (e.g., '4 PM').`, true);
+            // Note: If this function fails, the calling function (handleManualSet) will show the error.
             return null;
         };
 
@@ -313,7 +316,6 @@
                 button.onclick = (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
                     deleteReminder(id);
-                    setStatus("Reminder deleted.", false);
                 };
             });
             
@@ -358,7 +360,7 @@
                     triggeredReminders.add(r.id);
                     newAlarmTriggered = true;
                     
-                    setStatus(`ALERT: "${r.text}" is DUE NOW! Snooze or delete it.`, true);
+                    setStatus(`ALERT: "${r.text}" is DUE NOW! Use the snooze/delete buttons or type a command.`, true);
 
                     // Announce it via TTS once (no modal)
                     if ('speechSynthesis' in window) {
@@ -384,36 +386,69 @@
         // --- Input Handling ---
 
         /**
-         * Handles manual text input submission (ONLY for setting new reminders).
+         * Handles manual text input submission (for setting new reminders or managing due ones).
          */
         const handleManualSet = () => {
             const inputContent = REMINDER_INPUT.value.trim();
             if (!inputContent) { return; }
 
             const lowerContent = inputContent.toLowerCase();
+            let commandHandled = false;
 
-            // 1. New Rule: Check for commands that MUST be spoken/clicked
-            if (lowerContent.includes('snooze') || lowerContent.includes('delete')) {
-                 setStatus("Snooze and Delete commands must be spoken into the microphone (after an alarm is due) or use the on-screen buttons. The text field is only for setting *new* reminders.", true);
-                 return;
+            // Find the ID of the first reminder currently due
+            const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
+            
+            // --- 1. SNOOZE COMMAND (Manual Input) ---
+            // Pattern: "snooze (for) [time phrase]"
+            const snoozeMatch = lowerContent.match(/snooze (?:for)?\s*(.+)/);
+            if (snoozeMatch) {
+                commandHandled = true;
+                if (dueReminder) {
+                    const timePhrase = snoozeMatch[1].trim();
+                    const delayMs = parseSnoozeDelay(timePhrase); 
+
+                    if (delayMs > 0) {
+                        snoozeReminder(dueReminder.id, delayMs);
+                        REMINDER_INPUT.value = '';
+                    } else {
+                        setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}". Try "5 minutes" or "10 seconds".`, true);
+                    }
+                } else {
+                    setStatus("No active reminder is currently due to snooze. The snooze command only applies to DUE reminders.", true);
+                }
             }
 
-            // Regex for NEW reminder: [task] (on/in/at) [time phrase]
-            const newReminderMatch = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
-
-            if (newReminderMatch && newReminderMatch.length === 3) {
-                const text = newReminderMatch[1].trim();
-                const timePhrase = newReminderMatch[2].trim();
-                
-                const time = parseReminderTime(timePhrase);
-                
-                if (time) {
-                    addReminder(text, time);
-                    REMINDER_INPUT.value = ''; 
+            // --- 2. DELETE COMMAND (Manual Input) ---
+            // Pattern: "delete" (targets the DUE reminder)
+            else if (lowerContent.includes('delete')) {
+                commandHandled = true;
+                if (dueReminder) {
+                    deleteReminder(dueReminder.id);
+                    REMINDER_INPUT.value = '';
+                } else {
+                    setStatus("No active reminder is currently due to delete. Please use the trash can icon next to a non-due reminder.", true);
                 }
-            } else {
-                // This is the error message for manual input failure.
-                setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase] for manual input.", true);
+            }
+
+            // --- 3. NEW REMINDER COMMAND ---
+            if (!commandHandled) {
+                // Regex for NEW reminder: [task] (on/in/at) [time phrase]
+                const newReminderMatch = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
+
+                if (newReminderMatch && newReminderMatch.length === 3) {
+                    const text = newReminderMatch[1].trim();
+                    const timePhrase = newReminderMatch[2].trim();
+                    
+                    const time = parseReminderTime(timePhrase);
+                    
+                    if (time) {
+                        addReminder(text, time);
+                        REMINDER_INPUT.value = ''; 
+                    }
+                } else {
+                    // This is the error message for manual input failure.
+                    setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase] for setting a new reminder.", true);
+                }
             }
         };
 
@@ -472,14 +507,13 @@
         const processVoiceCommand = (transcript) => {
             const lowerTranscript = transcript.toLowerCase();
 
+            // Find the ID of the first reminder currently due
+            const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
+
             // 1. Snooze Command Pattern (Voice Command)
-            // Handles "snooze for 5 seconds", "snooze 5 more seconds", etc.
             const snoozeMatch = lowerTranscript.match(/snooze (?:for)?\s*(.+)/);
 
             if (snoozeMatch) {
-                // Find the ID of the first reminder currently due
-                const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
-
                 if (dueReminder) {
                     const timePhrase = snoozeMatch[1].trim();
                     const delayMs = parseSnoozeDelay(timePhrase); 
@@ -498,7 +532,18 @@
                 }
             }
             
-            // 2. Main Reminder Pattern (New Reminder)
+            // 2. Delete Command Pattern (Voice Command)
+            if (lowerTranscript.includes('delete')) {
+                 if (dueReminder) {
+                    deleteReminder(dueReminder.id);
+                    return;
+                } else {
+                    setStatus("No active reminder is currently due to delete. Use the trash icon to delete non-due reminders.", true);
+                    return;
+                }
+            }
+            
+            // 3. Main Reminder Pattern (New Reminder)
             const newReminderMatch = lowerTranscript.match(/(?:set a reminder for|remind me to) (.+?) (?:on|in|at) (.+)/);
             
             if (newReminderMatch && newReminderMatch.length >= 3) {
@@ -508,11 +553,13 @@
                 
                 if (time) {
                     addReminder(text, time);
+                } else {
+                    setStatus(`I understood the task, but failed to parse the time "${timePhrase}". Try: "in 5 minutes".`, true);
                 }
                 return; // Command handled
             }
 
-            // 3. Fallback for Unmatched Commands
+            // 4. Fallback for Unmatched Commands
             setStatus(`I heard "${transcript}" but I couldn't process it. Try: "Remind me to call Mom in 1 hour" or "Snooze for 5 minutes."`, true);
         };
 
