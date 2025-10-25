@@ -81,7 +81,7 @@
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Use format: [Task] [on/in/at] [Time Phrase]</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Use format: [Task] [on/in/at] [Time Phrase] **for new reminders only**.</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -160,7 +160,7 @@
         const parseSnoozeDelay = (phrase) => {
             const lowerPhrase = phrase.toLowerCase().trim();
             
-            // Modified regex to allow filler words like "more" between the number and unit
+            // Regex allows for filler words like "more"
             const relativeMatch = lowerPhrase.match(/(\d+)\s+.*?(second|minute|hour|day|week)s?/i);
 
             if (relativeMatch) {
@@ -234,6 +234,7 @@
             // 1. Check for relative time using the Snooze parser
             const delayMs = parseSnoozeDelay(lowerPhrase);
             if (delayMs > 0) {
+                 // If a time phrase like "5 minutes" is used to set a new reminder
                  return now.getTime() + delayMs;
             }
             
@@ -389,6 +390,14 @@
             const inputContent = REMINDER_INPUT.value.trim();
             if (!inputContent) { return; }
 
+            const lowerContent = inputContent.toLowerCase();
+
+            // 1. New Rule: Check for commands that MUST be spoken/clicked
+            if (lowerContent.includes('snooze') || lowerContent.includes('delete')) {
+                 setStatus("Snooze and Delete commands must be spoken into the microphone (after an alarm is due) or use the on-screen buttons. The text field is only for setting *new* reminders.", true);
+                 return;
+            }
+
             // Regex for NEW reminder: [task] (on/in/at) [time phrase]
             const newReminderMatch = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
 
@@ -464,6 +473,7 @@
             const lowerTranscript = transcript.toLowerCase();
 
             // 1. Snooze Command Pattern (Voice Command)
+            // Handles "snooze for 5 seconds", "snooze 5 more seconds", etc.
             const snoozeMatch = lowerTranscript.match(/snooze (?:for)?\s*(.+)/);
 
             if (snoozeMatch) {
