@@ -288,7 +288,7 @@
                 isAlerting: false,
                 isDismissed: false,
                 isDeleted: false,
-                hasAlertedOnce: false, // NEW FLAG to prevent repeated log messages
+                hasAlertedOnce: false, 
             };
 
             reminderList.push(newReminder);
@@ -313,12 +313,10 @@
 
             if (!snoozeTime) {
                 log(`Error: Could not parse snooze time "${timePhrase}". Using default 5 minutes.`);
-                // If parsing fails for a complex phrase, try falling back to simple default, then exit.
                 const defaultSnooze = parseTimePhrase('5 minutes', now);
                  if (defaultSnooze) {
                     reminder.targetTime = defaultSnooze.getTime();
                     reminder.isAlerting = false;
-                    // Reset alert flag so it alerts and logs again when due
                     reminder.hasAlertedOnce = false; 
                     log(`Reminder "${reminder.task}" snoozed. New alert: ${formatTime(defaultSnooze)}. (Used default 5 mins)`);
                     renderReminders();
@@ -328,7 +326,6 @@
 
             reminder.targetTime = snoozeTime.getTime();
             reminder.isAlerting = false;
-            // Reset alert flag so it alerts and logs again when due
             reminder.hasAlertedOnce = false; 
             
             const timeStr = formatTime(snoozeTime);
@@ -349,7 +346,6 @@
         function handleDelete(id) {
             const reminder = reminderList.find(r => r.id === id);
             if (reminder) {
-                // Instead of deleting, we mark it deleted and filter it out later
                 reminder.isDeleted = true;
                 reminder.isAlerting = false;
                 log(`Reminder "${reminder.task}" permanently deleted.`);
@@ -448,15 +444,20 @@
 
             reminderList.forEach(r => {
                 if (!r.isDismissed && !r.isDeleted && r.targetTime <= now) {
-                    // Check if it's due and hasn't logged yet
+                    // Item is DUE and not dismissed/deleted
+                    
+                    // 1. Set/Maintain alerting state
+                    r.isAlerting = true;
+
+                    // 2. Only log the ALERT message ONCE
                     if (!r.hasAlertedOnce) { 
-                        r.isAlerting = true;
                         r.hasAlertedOnce = true; // Mark as logged
                         log(`ALERT: "${r.task}" is due! Respond with 'dismiss', 'delete', or 'snooze for [time]'.`);
-                    } else if (r.hasAlertedOnce) {
-                        // Keep alerting status true for pulsing and sound, but don't log again
-                        r.isAlerting = true;
-                    }
+                    } 
+                    
+                } else if (r.targetTime > now) {
+                    // Item is NOT due, ensure alerting is false
+                    r.isAlerting = false;
                 }
                 
                 if (r.isAlerting) {
