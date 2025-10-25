@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vocal Reminder App</title>
+    <title>Natural Language Reminder App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
@@ -87,16 +87,16 @@
 <body class="p-4">
 
     <div class="container-card">
-        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Vocal Reminders</h1>
-        <p class="text-gray-500 mb-6">Set, Snooze, Dismiss, or Delete tasks using natural language commands.</p>
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-2">Natural Language Reminders</h1>
+        <p class="text-gray-500 mb-6">Type commands to set, snooze, dismiss, or delete tasks.</p>
 
         <div class="mb-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-2">Commands:</h2>
             <ul class="text-sm text-gray-600 space-y-1 ml-4 list-disc">
-                <li>**Set**: `[Task]` **on/in/at** `[Time Phrase]`</li>
-                <li>**Snooze**: `snooze` or `snooze for 5 minutes`</li>
-                <li>**Dismiss**: `dismiss`</li>
-                <li>**Delete**: `delete`</li>
+                <li>**Set**: `[Task]` **on/in/at** `[Time Phrase]` (e.g., `check email in 5m`)</li>
+                <li>**Snooze (when alerting)**: `snooze` or `snooze for 5 minutes`</li>
+                <li>**Dismiss (when alerting)**: `dismiss`</li>
+                <li>**Delete (when alerting)**: `delete`</li>
             </ul>
         </div>
 
@@ -124,14 +124,18 @@
         let reminderList = [];
         let reminderIdCounter = 1;
         
-        // Use Tone.js for simple audio feedback (no external file needed)
-        let alertSynth;
-        
-        // Initialize the synth for an audible beep
-        function initSynth() {
-            // Check if Tone is available (it's not available in this environment, so we'll simulate)
-            // We must use a simple HTML Audio element since external libraries like Tone.js are not guaranteed.
-             // We will use a simple, in-browser generated audio context for a beep sound.
+        // --- Utility Functions ---
+
+        // Simple ID generator
+        function generateId() {
+            return `r-${reminderIdCounter++}`;
+        }
+
+        // Logs messages to the output log box
+        function log(message) {
+            const logElement = document.getElementById('outputLog');
+            logElement.innerHTML += `> ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
         }
 
         // Function to play a short beep
@@ -145,52 +149,43 @@
                 gainNode.connect(audioCtx.destination);
 
                 oscillator.type = 'square';
-                oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+                oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); 
                 gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
 
-                // Fade out quickly
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
 
                 oscillator.start();
                 oscillator.stop(audioCtx.currentTime + 0.3);
             } catch (e) {
                 console.error("Audio playback error:", e);
+                // Non-critical, just log the error
             }
         }
         
-        // --- Utility Functions ---
-
-        // Simple ID generator (since Firestore isn't used here, we rely on a counter)
-        function generateId() {
-            return `r-${reminderIdCounter++}`;
-        }
-
-        // Logs messages to the output log box
-        function log(message) {
-            const logElement = document.getElementById('outputLog');
-            logElement.innerHTML += `> ${message}\n`;
-            logElement.scrollTop = logElement.scrollHeight;
-        }
-
         // Finds the closest timestamp in the input to start parsing
         function findTimeKeywordIndex(text) {
-            const keywords = ['on', 'in', 'at'];
+            const keywords = [' on ', ' in ', ' at '];
             for (const keyword of keywords) {
-                const index = text.toLowerCase().lastIndexOf(` ${keyword} `);
+                // Use lastIndexOf to ensure we capture the time phrase at the end
+                const index = text.toLowerCase().lastIndexOf(keyword);
                 if (index !== -1) {
-                    return index + keyword.length + 1;
+                    return index + keyword.length - 1; // Position right after the keyword
                 }
             }
             return -1;
         }
         
-        // Converts a time phrase (e.g., "5 minutes" or "next tuesday at 2pm") into a Date object
+        // Converts a time phrase (e.g., "5 minutes" or "5s") into a Date object
         function parseTimePhrase(phrase, baseDate = new Date()) {
-            phrase = phrase.trim();
+            phrase = phrase.trim().toLowerCase();
             if (!phrase) return null;
 
-            // Simplified parsing for relative time (e.g., '5s', '10m', '1h')
-            const relativeMatch = phrase.match(/^(\d+)\s*(s|sec|seconds|m|min|minutes|h|hr|hours|d|day|days)$/i);
+            // CRITICAL FIX: Handle variations like "for 5 minutes", "5 more seconds", or just "5s"
+            const relaxedPhrase = phrase.replace(/^(for|in|more)\s+/, '').trim();
+            
+            // Regex for relative time: (Number) (Unit)
+            const relativeMatch = relaxedPhrase.match(/^(\d+)\s*(s|sec|seconds|m|min|minutes|h|hr|hours|d|day|days)$/i);
+            
             if (relativeMatch) {
                 const value = parseInt(relativeMatch[1], 10);
                 const unit = relativeMatch[2].toLowerCase();
@@ -204,10 +199,7 @@
                 return newDate;
             }
             
-            // For now, only simple relative time is supported for robustness.
-            // Full date/time parsing is complex and requires a library (like Chrono).
-            
-            return null; // Return null if parsing fails
+            return null;
         }
         
         // Formats the Date object into a readable string
@@ -235,19 +227,26 @@
 
         // Adds or updates a reminder
         function handleSetTask(input) {
-            const timeIndex = findTimeKeywordIndex(input);
+            // Check for a time keyword surrounded by spaces for better separation
+            const timeIndex = findTimeKeywordIndex(input); 
             if (timeIndex === -1) {
-                log('Error: Could not find a time keyword (on, in, at). Please rephrase.');
+                log('Error: Could not find a time keyword (on, in, at). Command format must be: [Task] in [Time].');
                 return;
             }
 
-            const taskDescription = input.substring(0, timeIndex - 4).trim();
-            const timePhrase = input.substring(timeIndex).trim();
+            const keyword = input.substring(timeIndex - 2, timeIndex + 1); // e.g., ' in '
+            const taskDescription = input.substring(0, timeIndex - keyword.length + 1).trim();
+            const timePhrase = input.substring(timeIndex + 1).trim();
             const targetDate = parseTimePhrase(timePhrase);
 
             if (!targetDate) {
-                log(`Error: Could not parse time phrase "${timePhrase}". Please use simple format (e.g., 5s, 10m, 1h).`);
+                log(`Error: Could not parse time phrase "${timePhrase}". Please use simple relative time (e.g., 5s, 10m, 1h).`);
                 return;
+            }
+
+            if (!taskDescription) {
+                 log('Error: Task description cannot be empty.');
+                 return;
             }
 
             const newReminder = {
@@ -260,30 +259,38 @@
             };
 
             reminderList.push(newReminder);
-            log(`Task "${taskDescription}" set for ${targetDate.toLocaleTimeString()}.`);
+            log(`Task "${taskDescription}" set for ${formatTime(targetDate)}.`);
             renderReminders();
         }
 
-        function handleSnooze(id, timePhrase) {
+        function handleSnooze(id, input) {
             const reminder = reminderList.find(r => r.id === id);
-            if (reminder) {
-                const now = new Date();
-                const snoozeTime = parseTimePhrase(timePhrase, now);
+            if (!reminder) return;
 
-                if (!snoozeTime) {
-                    log(`Error: Could not parse snooze time "${timePhrase}". Using default snooze time.`);
-                    // Default snooze to 5 minutes if phrase is invalid or empty
-                    snoozeTime = parseTimePhrase('5 minutes', now);
-                }
-
-                reminder.targetTime = snoozeTime.getTime();
-                reminder.isAlerting = false;
-                
-                const timeStr = formatTime(snoozeTime);
-                log(`Reminder "${reminder.task}" snoozed. New alert: ${timeStr}.`);
-                renderReminders();
-                playAlertSound(); // Stop the continuous alert sound (by immediately stopping the new one)
+            // Extract time phrase after "snooze"
+            let timePhrase = input.toLowerCase().replace('snooze', '').trim();
+            
+            // If the remaining phrase is empty or just prepositions, use default
+            if (!timePhrase || timePhrase === 'for' || timePhrase === 'in') {
+                timePhrase = '5 minutes'; 
             }
+            
+            // Allow full commands like "snooze for 5 minutes" or simple "5 minutes"
+            const now = new Date();
+            const snoozeTime = parseTimePhrase(timePhrase, now);
+
+            if (!snoozeTime) {
+                log(`Error: Could not parse snooze time "${timePhrase}". Using default 5 minutes.`);
+                return handleSnooze(id, '5 minutes'); // Retry with default
+            }
+
+            reminder.targetTime = snoozeTime.getTime();
+            reminder.isAlerting = false;
+            
+            const timeStr = formatTime(snoozeTime);
+            log(`Reminder "${reminder.task}" snoozed. New alert: ${timeStr}.`);
+            renderReminders();
+            // We call this to stop the continuous sound from the main loop
         }
 
         function handleDismiss(id) {
@@ -293,8 +300,6 @@
                 reminder.isAlerting = false;
                 log(`Reminder "${reminder.task}" dismissed. It remains in the list for reference.`);
                 renderReminders();
-                // Optionally stop sound if it was continuous
-                playAlertSound(); 
             }
         }
 
@@ -303,46 +308,45 @@
             if (reminder) {
                 reminder.isDeleted = true;
                 reminder.isAlerting = false;
-                log(`Reminder "${reminder.task}" deleted.`);
+                log(`Reminder "${reminder.task}" permanently deleted.`);
                 renderReminders();
-                // Optionally stop sound if it was continuous
-                playAlertSound(); 
             }
         }
         
         // --- Input Handling ---
 
-        function handleInput(input) {
+        function handleInput(rawInput) {
             document.getElementById('commandInput').value = '';
-            input = input.trim();
+            const input = rawInput.trim();
             if (!input) return;
+            
+            const normalizedInput = input.toLowerCase();
 
             // 1. Find the currently alerting item (if any)
             const alertingItem = reminderList.find(r => r.isAlerting);
-            const normalizedInput = input.toLowerCase();
 
-            // --- CRITICAL FIX: Prioritize Alert Handling Commands ---
+            // --- CRITICAL FIX: Prioritize Alert Handling Commands (highest priority) ---
             if (alertingItem) {
-                // Check for exact match for dismiss and delete
+                // A. Check for exact match for dismiss and delete
                 if (normalizedInput === 'dismiss') {
                     handleDismiss(alertingItem.id);
-                    return; // Crucial: Stop processing after handling the alert command
+                    return; // STOP EXECUTION
                 }
                 
                 if (normalizedInput === 'delete') {
                     handleDelete(alertingItem.id);
-                    return; // Crucial: Stop processing after handling the alert command
+                    return; // STOP EXECUTION
                 }
                 
-                // Check for snooze (allows for variations like "snooze" or "snooze for 5s")
+                // B. Check for snooze (must start with 'snooze')
                 if (normalizedInput.startsWith('snooze')) {
-                    const timePhrase = input.substring('snooze'.length).trim() || '5 minutes'; // Default snooze time
-                    handleSnooze(alertingItem.id, timePhrase);
-                    return; // Crucial: Stop processing after handling the alert command
+                    // Pass the whole input string to handleSnooze for proper parsing
+                    handleSnooze(alertingItem.id, input);
+                    return; // STOP EXECUTION
                 }
 
                 // If an item is alerting but the input is none of the alert commands,
-                // we fall through to the new task setting logic below.
+                // we fall through to the new task setting logic.
             }
             // --- End CRITICAL FIX Block ---
             
@@ -361,8 +365,23 @@
             container.innerHTML = activeReminders.map(r => {
                 const isPastDue = r.targetTime < Date.now();
                 const isAlertingClass = r.isAlerting ? 'reminder-alerting' : '';
-                const timeText = r.isDismissed ? 'DISMISSED' : formatTime(new Date(r.targetTime));
-                const statusColor = r.isDismissed ? 'text-gray-400' : (r.isAlerting ? 'text-red-600 font-bold' : (isPastDue ? 'text-orange-500' : 'text-indigo-600'));
+                
+                let timeText;
+                let statusColor;
+
+                if (r.isDismissed) {
+                    timeText = 'DISMISSED';
+                    statusColor = 'text-gray-400';
+                } else if (r.isAlerting) {
+                    timeText = 'ALERTING NOW!';
+                    statusColor = 'text-red-600 font-bold';
+                } else if (isPastDue) {
+                    timeText = 'Overdue - Awaiting Action';
+                    statusColor = 'text-orange-500';
+                } else {
+                    timeText = formatTime(new Date(r.targetTime));
+                    statusColor = 'text-indigo-600';
+                }
                 
                 return `
                     <div class="reminder-item p-4 rounded-lg flex justify-between items-center ${isAlertingClass}">
@@ -370,7 +389,6 @@
                             <p class="font-semibold text-gray-800">${r.task}</p>
                             <p class="text-sm ${statusColor}">Status: ${timeText}</p>
                         </div>
-                        <!-- Optional action buttons can be added here -->
                     </div>
                 `;
             }).join('');
@@ -383,19 +401,22 @@
         // The main check loop runs every second
         function checkReminders() {
             const now = Date.now();
-            let isAnyAlerting = false;
+            let shouldPlaySound = false;
 
             reminderList.forEach(r => {
+                // If it's time and not already alerting, dismissed, or deleted, set to alerting
                 if (!r.isDismissed && !r.isDeleted && !r.isAlerting && r.targetTime <= now) {
                     r.isAlerting = true;
                     log(`ALERT: "${r.task}" is due! Type 'dismiss', 'delete', or 'snooze for [time]'.`);
                 }
+                
+                // If any item is alerting, we need to play the sound
                 if (r.isAlerting) {
-                    isAnyAlerting = true;
+                    shouldPlaySound = true;
                 }
             });
 
-            if (isAnyAlerting) {
+            if (shouldPlaySound) {
                 playAlertSound();
             }
 
@@ -418,9 +439,8 @@
 
             // Start the check loop
             setInterval(checkReminders, 1000);
-
-            // Initialize the audio synth on user interaction
-            document.body.addEventListener('click', initSynth, { once: true });
+            
+            // No need to init synth on click since playAlertSound handles it internally
         });
     </script>
 </body>
