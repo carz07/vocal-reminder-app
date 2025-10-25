@@ -95,10 +95,16 @@
         .reminder-item {
             padding: 1rem;
             border-radius: 0.75rem;
-            border-left: 5px solid #5a67d8;
+            /* Update border-left color for dismissed items to be less prominent */
+            border-left: 5px solid #5a67d8; 
             background-color: #f7fafc;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             transition: all 0.2s ease-in-out;
+        }
+        /* Style for dismissed items to visually fade them out */
+        .reminder-dismissed {
+             opacity: 0.6;
+             border-left-color: #cbd5e0; /* Lighter gray for dismissed */
         }
         /* Alerting Styles */
         .reminder-alerting {
@@ -135,7 +141,7 @@
         <div class="input-group mb-4">
             <input type="text" id="commandInput" class="input-field" placeholder="e.g., Pay bills in 10s or dismiss">
             <button id="sendButton" class="set-button" title="Set Reminder">
-                <!-- Pen Icon (Restored) -->
+                <!-- Pen Icon -->
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                 </svg>
@@ -282,6 +288,7 @@
                 isAlerting: false,
                 isDismissed: false,
                 isDeleted: false,
+                hasAlertedOnce: false, // NEW FLAG to prevent repeated log messages
             };
 
             reminderList.push(newReminder);
@@ -311,6 +318,8 @@
                  if (defaultSnooze) {
                     reminder.targetTime = defaultSnooze.getTime();
                     reminder.isAlerting = false;
+                    // Reset alert flag so it alerts and logs again when due
+                    reminder.hasAlertedOnce = false; 
                     log(`Reminder "${reminder.task}" snoozed. New alert: ${formatTime(defaultSnooze)}. (Used default 5 mins)`);
                     renderReminders();
                 }
@@ -319,6 +328,8 @@
 
             reminder.targetTime = snoozeTime.getTime();
             reminder.isAlerting = false;
+            // Reset alert flag so it alerts and logs again when due
+            reminder.hasAlertedOnce = false; 
             
             const timeStr = formatTime(snoozeTime);
             log(`Reminder "${reminder.task}" snoozed. New alert: ${timeStr}.`);
@@ -356,7 +367,7 @@
             const normalizedInput = input.toLowerCase();
             const alertingItem = reminderList.find(r => r.isAlerting);
 
-            // 1. --- ALERT HANDLING PRIORITY (The Fix) ---
+            // 1. --- ALERT HANDLING PRIORITY ---
             if (alertingItem) {
                 if (normalizedInput === 'dismiss') {
                     handleDismiss(alertingItem.id);
@@ -383,19 +394,28 @@
         function renderReminders() {
             const container = document.getElementById('reminderListContainer');
             
-            // Only show items that are not deleted
-            const activeReminders = reminderList.filter(r => !r.isDeleted); 
+            // Filter: Only show items that are not deleted
+            const visibleReminders = reminderList.filter(r => !r.isDeleted); 
+
+            // Count: Only count items that are NOT dismissed and NOT deleted
+            const pendingCount = reminderList.filter(r => !r.isDismissed && !r.isDeleted).length;
             
-            container.innerHTML = activeReminders.map(r => {
+            container.innerHTML = visibleReminders.map(r => {
                 const isPastDue = r.targetTime < Date.now();
-                const isAlertingClass = r.isAlerting ? 'reminder-alerting' : '';
+                
+                let extraClass = '';
+                if (r.isAlerting) {
+                    extraClass = 'reminder-alerting';
+                } else if (r.isDismissed) {
+                    extraClass = 'reminder-dismissed';
+                }
                 
                 let timeText;
                 let statusColor;
 
                 if (r.isDismissed) {
                     timeText = 'Dismissed';
-                    statusColor = 'text-gray-400';
+                    statusColor = 'text-gray-400 font-medium';
                 } else if (r.isAlerting) {
                     timeText = 'ALERTING NOW!';
                     statusColor = 'text-red-600 font-bold';
@@ -408,7 +428,7 @@
                 }
                 
                 return `
-                    <div class="reminder-item p-4 flex justify-between items-center ${isAlertingClass}">
+                    <div class="reminder-item p-4 flex justify-between items-center ${extraClass}">
                         <div class="flex-grow">
                             <p class="font-semibold text-gray-800">${r.task}</p>
                             <p class="text-sm ${statusColor}">${timeText}</p>
@@ -417,7 +437,7 @@
                 `;
             }).join('');
 
-            document.getElementById('reminderCount').textContent = activeReminders.length;
+            document.getElementById('reminderCount').textContent = pendingCount; // Use the corrected count
         }
 
         // --- Main Loop and Event Listeners ---
@@ -427,9 +447,16 @@
             let shouldPlaySound = false;
 
             reminderList.forEach(r => {
-                if (!r.isDismissed && !r.isDeleted && !r.isAlerting && r.targetTime <= now) {
-                    r.isAlerting = true;
-                    log(`ALERT: "${r.task}" is due! Respond with 'dismiss', 'delete', or 'snooze for [time]'.`);
+                if (!r.isDismissed && !r.isDeleted && r.targetTime <= now) {
+                    // Check if it's due and hasn't logged yet
+                    if (!r.hasAlertedOnce) { 
+                        r.isAlerting = true;
+                        r.hasAlertedOnce = true; // Mark as logged
+                        log(`ALERT: "${r.task}" is due! Respond with 'dismiss', 'delete', or 'snooze for [time]'.`);
+                    } else if (r.hasAlertedOnce) {
+                        // Keep alerting status true for pulsing and sound, but don't log again
+                        r.isAlerting = true;
+                    }
                 }
                 
                 if (r.isAlerting) {
