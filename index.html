@@ -40,12 +40,24 @@
             background-color: #fef2f2; /* Red-50 */
             border-left: 4px solid #ef4444; /* Red-500 */
         }
+        /* Shake animation for alert */
+        @keyframes shake {
+            0% { transform: translateX(0); }
+            20% { transform: translateX(-5px); }
+            40% { transform: translateX(5px); }
+            60% { transform: translateX(-5px); }
+            80% { transform: translateX(5px); }
+            100% { transform: translateX(0); }
+        }
+        .shaking {
+            animation: shake 0.2s ease-in-out 2; /* Runs twice */
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8 flex flex-col items-center">
 
-    <!-- Main Container -->
-    <div class="w-full max-w-xl">
+    <!-- Main Container - Added ID for shake effect -->
+    <div id="main-container" class="w-full max-w-xl transition-transform duration-100">
 
         <h1 class="text-3xl font-bold text-gray-800 text-center mb-6">Vocal Reminder</h1>
         
@@ -94,6 +106,7 @@
         const SET_MANUAL_BTN = document.getElementById('set-manual-btn');
         const MIC_BUTTON = document.getElementById('mic-button');
         const MIC_STATUS = document.getElementById('mic-status');
+        const MAIN_CONTAINER = document.getElementById('main-container');
 
         // --- Utility Functions ---
 
@@ -141,12 +154,14 @@
         // --- Snooze Logic ---
 
         /**
-         * Parses a relative time phrase (e.g., "5 seconds", "2 hours") into milliseconds.
+         * Parses a relative time phrase (e.g., "5 more seconds", "2 hours") into milliseconds.
          * Returns 0 if parsing fails.
          */
         const parseSnoozeDelay = (phrase) => {
             const lowerPhrase = phrase.toLowerCase().trim();
-            const relativeMatch = lowerPhrase.match(/(\d+)\s+(second|minute|hour|day|week)s?/i);
+            
+            // Modified regex to allow filler words like "more" between the number and unit
+            const relativeMatch = lowerPhrase.match(/(\d+)\s+.*?(second|minute|hour|day|week)s?/i);
 
             if (relativeMatch) {
                 const value = parseInt(relativeMatch[1], 10);
@@ -210,6 +225,7 @@
 
         /**
          * Parses a natural language time phrase into a future UTC timestamp.
+         * Used for setting new reminders only.
          */
         const parseReminderTime = (phrase) => {
             const lowerPhrase = phrase.toLowerCase().trim();
@@ -329,14 +345,17 @@
             });
         };
 
-        // --- Main Loop (Checking Alarms for TTS and Visual Alert) ---
+        // --- Main Loop (Checking Alarms for TTS, Visual Alert, and Shake) ---
 
         const mainLoop = () => {
             const now = Date.now();
+            let newAlarmTriggered = false;
+
             reminders.forEach(r => {
                 if (r.timestamp < now && !triggeredReminders.has(r.id)) {
                     // New, due reminder found!
                     triggeredReminders.add(r.id);
+                    newAlarmTriggered = true;
                     
                     setStatus(`ALERT: "${r.text}" is DUE NOW! Snooze or delete it.`, true);
 
@@ -346,11 +365,19 @@
                         let utterance = new SpeechSynthesisUtterance(`Reminder: ${r.text}`);
                         window.speechSynthesis.speak(utterance);
                     }
-                    
-                    // Re-render to show the snooze button and red style
-                    renderReminders(); 
                 }
             });
+            
+            if (newAlarmTriggered && MAIN_CONTAINER) {
+                 // Trigger the shake effect
+                MAIN_CONTAINER.classList.add('shaking');
+                setTimeout(() => {
+                    MAIN_CONTAINER.classList.remove('shaking');
+                }, 400); // Remove after animation completes (0.2s * 2)
+
+                // Re-render to show the snooze button and red style
+                renderReminders(); 
+            }
         };
 
         // --- Input Handling ---
@@ -376,6 +403,7 @@
                     REMINDER_INPUT.value = ''; 
                 }
             } else {
+                // This is the error message for manual input failure.
                 setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase] for manual input.", true);
             }
         };
@@ -450,7 +478,8 @@
                         snoozeReminder(dueReminder.id, delayMs);
                         return; // Command handled
                     } else {
-                        setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}".`, true);
+                        // Custom error for failed snooze time parsing
+                        setStatus(`Snooze failed: Couldn't understand the time phrase "${timePhrase}". Please try "5 minutes" or "10 seconds".`, true);
                         return;
                     }
                 } else {
@@ -463,7 +492,6 @@
             const newReminderMatch = lowerTranscript.match(/(?:set a reminder for|remind me to) (.+?) (?:on|in|at) (.+)/);
             
             if (newReminderMatch && newReminderMatch.length >= 3) {
-                // We shift the indices slightly to account for the "set a reminder for" capture group
                 const text = newReminderMatch[1].trim(); 
                 const timePhrase = newReminderMatch[2].trim();
                 const time = parseReminderTime(timePhrase); 
