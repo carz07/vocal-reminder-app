@@ -29,9 +29,6 @@
             70% { box-shadow: 0 0 0 10px rgba(76, 29, 149, 0); }
             100% { box-shadow: 0 0 0 0 rgba(76, 29, 149, 0); }
         }
-        .text-input-group {
-            position: relative;
-        }
         .pen-button {
             transition: transform 0.1s ease;
         }
@@ -49,7 +46,7 @@
         
         <!-- Status Message Area -->
         <div id="status-message" class="p-3 text-sm text-center rounded-lg mb-6 transition-all duration-300 min-h-[40px] flex items-center justify-center bg-blue-100 text-blue-800 border border-blue-200">
-            Welcome! This is the session-only version. Reminders will not be saved after closing the tab.
+            Reminder app running. Reminders are saved for this session only.
         </div>
 
         <!-- Microphone Input Area -->
@@ -72,57 +69,22 @@
         <hr class="my-8 border-gray-200">
 
         <!-- Reminder List -->
-        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upcoming Reminders (Current Session Only)</h2>
+        <h2 class="text-2xl font-semibold text-gray-800 mb-4">Upcoming Reminders</h2>
         <div id="reminders-list" class="space-y-3">
             <!-- Reminders will be injected here -->
             <p id="no-reminders" class="text-center text-gray-500 p-4 bg-white rounded-lg shadow-md">No reminders set yet.</p>
         </div>
     </div>
 
-    <!-- Alarm Modal -->
-    <div id="alarm-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden items-center justify-center p-4 z-50 transition-opacity duration-300">
-        <div class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl max-w-sm w-full text-center transform transition-all duration-300 scale-95 opacity-0" id="modal-content">
-            <div class="flex justify-center mb-4">
-                <i class="fas fa-bell text-5xl text-red-500 animate-pulse"></i>
-            </div>
-            <h3 class="text-xl font-bold text-gray-800 mb-2">TIME TO REMEMBER!</h3>
-            <p id="alarm-text" class="text-lg text-gray-600 mb-6 font-medium break-words"></p>
-
-            <!-- Snooze Options -->
-            <div class="mb-4">
-                <select id="snooze-duration" class="w-full p-2 border border-gray-300 rounded-lg text-gray-700">
-                    <option value="5">5 Seconds (Testing)</option>
-                    <option value="30">30 Minutes</option>
-                    <option value="60">1 Hour</option>
-                    <option value="1440">1 Day</option>
-                </select>
-            </div>
-
-            <div class="flex justify-center space-x-3">
-                <button id="snooze-btn" class="px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-150">
-                    Snooze
-                </button>
-                <button id="dismiss-btn" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
-                    Dismiss
-                </button>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // --- GLOBAL SETUP (NO STORAGE) ---
+        // --- GLOBAL SETUP (NO STORAGE, NO MODAL) ---
         let reminders = []; // Session-only array
         let recognition = null; 
+        let triggeredReminders = new Set(); // Tracks reminders that have been announced via TTS
 
         // --- DOM Elements ---
         const STATUS_MESSAGE = document.getElementById('status-message');
         const REMINDERS_LIST = document.getElementById('reminders-list');
-        const ALARM_MODAL = document.getElementById('alarm-modal');
-        const MODAL_CONTENT = document.getElementById('modal-content');
-        const ALARM_TEXT = document.getElementById('alarm-text');
-        const SNOOZE_BTN = document.getElementById('snooze-btn');
-        const DISMISS_BTN = document.getElementById('dismiss-btn');
-        const SNOOZE_DURATION_SELECT = document.getElementById('snooze-duration');
         const REMINDER_INPUT = document.getElementById('reminder-input');
         const SET_MANUAL_BTN = document.getElementById('set-manual-btn');
         const MIC_BUTTON = document.getElementById('mic-button');
@@ -188,6 +150,8 @@
          */
         const deleteReminder = (id) => {
             reminders = reminders.filter(r => r.id !== id);
+            // Clean up the set of triggered reminders
+            triggeredReminders.delete(id); 
             renderReminders();
         };
 
@@ -195,7 +159,8 @@
 
         /**
          * Parses a natural language time phrase into a future UTC timestamp.
-         * @param {string} phrase The time phrase (e.g., "5 seconds", "October 25 at 4:30 PM").
+         * (This logic is crucial for both manual and voice input)
+         * @param {string} phrase The time phrase (e.g., "5 seconds", "2 hours").
          * @returns {number | null} Future UTC timestamp in milliseconds, or null if parsing fails.
          */
         const parseReminderTime = (phrase) => {
@@ -232,12 +197,11 @@
                 }
                 
                 if (targetTime.getTime() > now.getTime()) {
-                    //setStatus(`Parsed time: ${formatTime(targetTime)} (Relative to now).`, false);
                     return targetTime.getTime();
                 }
             }
 
-            // 2. Specific Time/Date Parsing (e.g., "tomorrow at 5pm", "October 25 at 11am", "4:30 PM")
+            // 2. Specific Time/Date Parsing (e.g., "tomorrow at 5pm", "4:30 PM")
             try {
                 let parsedDate = new Date(phrase);
                 
@@ -248,7 +212,6 @@
                         if (timeOnly) {
                             parsedDate.setDate(parsedDate.getDate() + 1);
                         } else {
-                            // If a full date was specified in the past, treat it as invalid.
                             return null;
                         }
                     }
@@ -259,7 +222,6 @@
             }
 
             if (targetTime && targetTime.getTime() > now.getTime()) {
-                //setStatus(`Parsed time: ${formatTime(targetTime)} (Specific date/time).`, false);
                 return targetTime.getTime();
             }
 
@@ -276,8 +238,11 @@
         const renderReminders = () => {
             REMINDERS_LIST.innerHTML = '';
             
-            // Only show active reminders (those not yet triggered)
-            const activeReminders = reminders.filter(r => r.timestamp > Date.now()); 
+            // Filter out reminders that have been marked as "triggered" AND are past due
+            const activeReminders = reminders.filter(r => {
+                // Keep all future reminders, and keep past reminders that haven't been deleted yet.
+                return true; 
+            }); 
             
             if (activeReminders.length === 0) {
                 REMINDERS_LIST.innerHTML = '<p id="no-reminders" class="text-center text-gray-500 p-4 bg-white rounded-lg shadow-md">No reminders set yet.</p>';
@@ -285,13 +250,18 @@
             }
 
             activeReminders.forEach(r => {
+                const isDue = triggeredReminders.has(r.id);
+                
                 const reminderElement = document.createElement('div');
-                reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md bg-white hover:shadow-lg transition duration-150`;
+                // Apply visual alert style for due reminders
+                reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md transition duration-150 
+                    ${isDue ? 'bg-red-100 border-l-4 border-red-500 hover:shadow-xl' : 'bg-white hover:shadow-lg'}`;
+                    
                 reminderElement.innerHTML = `
                     <div>
-                        <p class="font-medium text-gray-800 break-words">${r.text}</p>
-                        <p class="text-xs text-indigo-500 mt-1">
-                            ${formatTime(r.timestamp)}
+                        <p class="font-medium ${isDue ? 'text-red-800 font-bold' : 'text-gray-800'} break-words">${r.text}</p>
+                        <p class="text-xs ${isDue ? 'text-red-600 font-bold' : 'text-indigo-500'} mt-1">
+                            ${isDue ? 'DUE NOW! (Dismiss Below)' : formatTime(r.timestamp)}
                         </p>
                     </div>
                     <button data-id="${r.id}" class="delete-btn text-gray-400 hover:text-red-600 ml-4 p-2 transition duration-150">
@@ -306,21 +276,45 @@
                 button.onclick = (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
                     deleteReminder(id);
+                    setStatus("Reminder deleted.", false);
                 };
+            });
+        };
+
+        // --- Main Loop (Checking Alarms for TTS and Visual Alert) ---
+
+        const mainLoop = () => {
+            const now = Date.now();
+            reminders.forEach(r => {
+                if (r.timestamp < now && !triggeredReminders.has(r.id)) {
+                    // New, due reminder found!
+                    triggeredReminders.add(r.id);
+                    
+                    setStatus(`ALERT: ${r.text} is DUE NOW! Please delete it from the list.`, true);
+
+                    // Announce it via TTS once
+                    if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel();
+                        let utterance = new SpeechSynthesisUtterance(`Reminder: ${r.text}`);
+                        window.speechSynthesis.speak(utterance);
+                    }
+                    
+                    // Re-render to apply the red/yellow "DUE NOW" style
+                    renderReminders(); 
+                }
             });
         };
 
         // --- Input Handling ---
 
         /**
-         * Handles manual text input submission.
+         * Handles manual text input submission. THIS IS THE CORE FIX.
          */
         const handleManualSet = () => {
             const inputContent = REMINDER_INPUT.value.trim();
             if (!inputContent) { return; }
 
             // Tries to match: "[task] (on|in|at) [time phrase]"
-            // This regex is crucial for parsing: (.+?)\s+(?:on|in|at)\s+(.+)
             const match = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
 
             if (match && match.length === 3) {
@@ -339,94 +333,6 @@
             } else {
                 setStatus("Input format error. Please use: [Task] [on/in/at] [Time Phrase]", true);
             }
-        };
-
-        // --- Alarm and Snooze Logic (Simplified) ---
-
-        let currentAlarmId = null;
-        let utterance = null;
-
-        /**
-         * Shows the alarm modal and triggers speech synthesis.
-         * @param {object} reminder The reminder object.
-         */
-        const showAlarm = (reminder) => {
-            currentAlarmId = reminder.id;
-            ALARM_TEXT.textContent = reminder.text;
-
-            ALARM_MODAL.classList.remove('hidden');
-            ALARM_MODAL.classList.add('flex');
-            // Animate in
-            setTimeout(() => {
-                MODAL_CONTENT.classList.remove('scale-95', 'opacity-0');
-                MODAL_CONTENT.classList.add('scale-100', 'opacity-100');
-            }, 10);
-
-            // Read the reminder text aloud
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                utterance = new SpeechSynthesisUtterance(`Reminder: ${reminder.text}`);
-                window.speechSynthesis.speak(utterance);
-            }
-        };
-
-        /**
-         * Hides the alarm modal.
-         */
-        const hideAlarm = () => {
-            if ('speechSynthesis' in window && utterance) {
-                window.speechSynthesis.cancel();
-            }
-            // Animate out
-            MODAL_CONTENT.classList.remove('scale-100', 'opacity-100');
-            MODAL_CONTENT.classList.add('scale-95', 'opacity-0');
-            
-            setTimeout(() => {
-                ALARM_MODAL.classList.remove('flex');
-                ALARM_MODAL.classList.add('hidden');
-                currentAlarmId = null;
-            }, 300); // Wait for animation to finish
-        };
-
-        // Event listener for Snooze
-        SNOOZE_BTN.onclick = () => {
-            if (!currentAlarmId) return;
-
-            const durationInMinutes = parseInt(SNOOZE_DURATION_SELECT.value, 10);
-            const snoozeTime = Date.now() + (durationInMinutes * 60 * 1000);
-            
-            const reminderToSnooze = reminders.find(r => r.id === currentAlarmId);
-
-            if (reminderToSnooze) {
-                // Delete the original reminder
-                deleteReminder(currentAlarmId);
-                // Add a new reminder for the snooze time.
-                addReminder(`(Snoozed) ${reminderToSnooze.text}`, snoozeTime);
-            }
-
-            hideAlarm();
-            setStatus(`Snoozed! Will remind you again at ${formatTime(snoozeTime)}.`, false);
-        };
-
-        // Event listener for Dismiss
-        DISMISS_BTN.onclick = () => {
-            if (currentAlarmId) {
-                deleteReminder(currentAlarmId);
-            }
-            hideAlarm();
-            setStatus("Reminder dismissed.", false);
-        };
-
-        // --- Main Loop (Checking Alarms) ---
-
-        const mainLoop = () => {
-            const now = Date.now();
-            reminders.forEach(r => {
-                // Check if the reminder is due and not currently showing an alarm
-                if (r.timestamp < now && r.id !== currentAlarmId) {
-                    showAlarm(r);
-                }
-            });
         };
 
         // --- Speech Recognition ---
@@ -485,13 +391,7 @@
         const processVoiceCommand = (transcript) => {
             const lowerTranscript = transcript.toLowerCase();
 
-            // 1. Check for simple cancel/stop
-            if (lowerTranscript.includes('cancel') || lowerTranscript.includes('stop')) {
-                setStatus("Voice command cancelled.", false);
-                return;
-            }
-
-            // 2. Main Reminder Pattern (Voice Command)
+            // 1. Main Reminder Pattern (Voice Command)
             const match = lowerTranscript.match(/set a reminder for (.+?) (?:on|in|at) (.+)/);
             
             if (match && match.length === 3) {
@@ -505,8 +405,8 @@
                 return;
             }
 
-            // 3. Fallback for Unmatched Commands
-            setStatus(`I heard "${transcript}" but I couldn't understand that command. Please try "Set a reminder for [task] on October 25 at 11am."`, true);
+            // 2. Fallback for Unmatched Commands
+            setStatus(`I heard "${transcript}" but I couldn't understand that command. Please try "Set a reminder for [task] in 5 seconds."`, true);
         };
 
 
@@ -529,6 +429,7 @@
                 window.speechSynthesis.getVoices(); 
             }
             setupSpeechRecognition();
+            renderReminders(); // Initial empty render
         };
 
     </script>
