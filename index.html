@@ -35,6 +35,11 @@
         .pen-button:active {
             transform: scale(0.95);
         }
+        /* Custom style for the due reminder */
+        .reminder-due {
+            background-color: #fef2f2; /* Red-50 */
+            border-left: 4px solid #ef4444; /* Red-500 */
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8 flex flex-col items-center">
@@ -93,19 +98,37 @@
         // --- Utility Functions ---
 
         /**
-         * Formats a timestamp into a human-readable date and time string.
-         * @param {number} timestamp
-         * @returns {string} Formatted time string
+         * Formats the remaining time into a human-readable countdown string.
+         * @param {number} targetTimestamp The future timestamp in milliseconds.
+         * @returns {string} Formatted time string (e.g., "2d 5h 10m")
          */
-        const formatTime = (timestamp) => {
-            const date = new Date(timestamp);
-            return date.toLocaleString([], {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
+        const formatTimeRemaining = (targetTimestamp) => {
+            const remainingMs = targetTimestamp - Date.now();
+            if (remainingMs <= 0) return "Due Now!";
+
+            const totalSeconds = Math.floor(remainingMs / 1000);
+            const days = Math.floor(totalSeconds / (3600 * 24));
+            const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+
+            const parts = [];
+            if (days > 0) parts.push(`${days}d`);
+            if (hours > 0) parts.push(`${hours}h`);
+            if (minutes > 0) parts.push(`${minutes}m`);
+            if (totalSeconds < 60 && totalSeconds > 0) {
+                 // Always show seconds if the countdown is less than a minute
+                parts.push(`${seconds}s`);
+            } else if (totalSeconds === 0) {
+                return "Due Now!";
+            }
+            
+            // Only show up to 3 biggest units, ensuring at least one is shown if time is > 0
+            if (parts.length === 0 && totalSeconds > 0) {
+                 return `${seconds}s`;
+            }
+
+            return parts.slice(0, 3).join(' ');
         };
 
         /**
@@ -127,8 +150,6 @@
 
         /**
          * Adds a new reminder to the local array and triggers a UI update.
-         * @param {string} text Reminder text.
-         * @param {number} timestamp Target timestamp in milliseconds.
          */
         const addReminder = (text, timestamp) => {
             const newId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
@@ -138,19 +159,16 @@
                 timestamp: timestamp,
                 createdAt: Date.now()
             });
-            // Keep sorted for display purposes
             reminders.sort((a, b) => a.timestamp - b.timestamp);
             renderReminders();
-            setStatus(`Reminder set for: ${formatTime(timestamp)}`, false);
+            setStatus(`Reminder set! It will go off in: ${formatTimeRemaining(timestamp)}`, false);
         };
 
         /**
          * Deletes a reminder from the local array and triggers a UI update.
-         * @param {string} id Unique ID of the reminder to delete.
          */
         const deleteReminder = (id) => {
             reminders = reminders.filter(r => r.id !== id);
-            // Clean up the set of triggered reminders
             triggeredReminders.delete(id); 
             renderReminders();
         };
@@ -159,16 +177,13 @@
 
         /**
          * Parses a natural language time phrase into a future UTC timestamp.
-         * (This logic is crucial for both manual and voice input)
-         * @param {string} phrase The time phrase (e.g., "5 seconds", "2 hours").
-         * @returns {number | null} Future UTC timestamp in milliseconds, or null if parsing fails.
          */
         const parseReminderTime = (phrase) => {
             const lowerPhrase = phrase.toLowerCase().trim();
             const now = new Date();
             let targetTime = null;
 
-            // 1. Relative Time Parsing (e.g., "5 seconds", "2 hours", "3 days")
+            // 1. Relative Time Parsing (e.g., "5 seconds", "2 hours")
             const relativeMatch = lowerPhrase.match(/(\d+)\s+(second|minute|hour|day|week)s?/i);
 
             if (relativeMatch) {
@@ -192,8 +207,6 @@
                     case 'week':
                         targetTime.setDate(now.getDate() + (value * 7));
                         break;
-                    default:
-                        return null;
                 }
                 
                 if (targetTime.getTime() > now.getTime()) {
@@ -208,11 +221,12 @@
                 if (!isNaN(parsedDate.getTime())) {
                     if (parsedDate.getTime() <= now.getTime()) {
                         // If only a time was specified (e.g., "5 PM"), set it for tomorrow.
-                        const timeOnly = parsedDate.toDateString() === now.toDateString();
+                        // We check if the parsed date is the same day but the time is past.
+                        const timeOnly = parsedDate.toDateString() === now.toDateString() && parsedDate.getTime() < now.getTime();
                         if (timeOnly) {
                             parsedDate.setDate(parsedDate.getDate() + 1);
                         } else {
-                            return null;
+                            return null; // Date was in the past and was not just a time
                         }
                     }
                     targetTime = parsedDate;
@@ -225,8 +239,7 @@
                 return targetTime.getTime();
             }
 
-            // If all parsing fails
-            setStatus(`Couldn't understand the time phrase "${phrase}". Please be more specific.`, true);
+            setStatus(`Couldn't understand the time phrase "${phrase}". Please use relative time (e.g., '5 minutes') or specific time (e.g., '4 PM').`, true);
             return null;
         };
 
@@ -238,30 +251,27 @@
         const renderReminders = () => {
             REMINDERS_LIST.innerHTML = '';
             
-            // Filter out reminders that have been marked as "triggered" AND are past due
-            const activeReminders = reminders.filter(r => {
-                // Keep all future reminders, and keep past reminders that haven't been deleted yet.
-                return true; 
-            }); 
-            
-            if (activeReminders.length === 0) {
+            if (reminders.length === 0) {
                 REMINDERS_LIST.innerHTML = '<p id="no-reminders" class="text-center text-gray-500 p-4 bg-white rounded-lg shadow-md">No reminders set yet.</p>';
                 return;
             }
 
-            activeReminders.forEach(r => {
+            reminders.forEach(r => {
                 const isDue = triggeredReminders.has(r.id);
                 
                 const reminderElement = document.createElement('div');
-                // Apply visual alert style for due reminders
+                
                 reminderElement.className = `p-4 flex items-center justify-between rounded-lg shadow-md transition duration-150 
-                    ${isDue ? 'bg-red-100 border-l-4 border-red-500 hover:shadow-xl' : 'bg-white hover:shadow-lg'}`;
+                    ${isDue ? 'reminder-due hover:shadow-xl' : 'bg-white hover:shadow-lg'}`;
                     
+                // Use data-timestamp for the countdown update function
                 reminderElement.innerHTML = `
                     <div>
                         <p class="font-medium ${isDue ? 'text-red-800 font-bold' : 'text-gray-800'} break-words">${r.text}</p>
-                        <p class="text-xs ${isDue ? 'text-red-600 font-bold' : 'text-indigo-500'} mt-1">
-                            ${isDue ? 'DUE NOW! (Dismiss Below)' : formatTime(r.timestamp)}
+                        <p class="text-sm ${isDue ? 'text-red-600 font-bold' : 'text-indigo-500'} mt-1 countdown-display" 
+                           data-timestamp="${r.timestamp}" 
+                           data-id="${r.id}">
+                            ${isDue ? 'DUE NOW!' : formatTimeRemaining(r.timestamp)}
                         </p>
                     </div>
                     <button data-id="${r.id}" class="delete-btn text-gray-400 hover:text-red-600 ml-4 p-2 transition duration-150">
@@ -280,6 +290,27 @@
                 };
             });
         };
+        
+        // --- Countdown Update Loop ---
+
+        /**
+         * Updates the text content of all visible countdown timers.
+         * Runs every 500ms for a smooth update.
+         */
+        const updateCountdown = () => {
+            document.querySelectorAll('.countdown-display').forEach(el => {
+                const timestamp = parseInt(el.getAttribute('data-timestamp'));
+                const id = el.getAttribute('data-id');
+                const isDue = triggeredReminders.has(id);
+
+                if (isDue) {
+                    el.textContent = 'DUE NOW!';
+                } else if (timestamp > Date.now()) {
+                    // Update countdown for future reminders
+                    el.textContent = formatTimeRemaining(timestamp);
+                }
+            });
+        };
 
         // --- Main Loop (Checking Alarms for TTS and Visual Alert) ---
 
@@ -290,16 +321,16 @@
                     // New, due reminder found!
                     triggeredReminders.add(r.id);
                     
-                    setStatus(`ALERT: ${r.text} is DUE NOW! Please delete it from the list.`, true);
+                    setStatus(`ALERT: "${r.text}" is DUE NOW! Please delete it from the list.`, true);
 
-                    // Announce it via TTS once
+                    // Announce it via TTS once (no modal)
                     if ('speechSynthesis' in window) {
                         window.speechSynthesis.cancel();
                         let utterance = new SpeechSynthesisUtterance(`Reminder: ${r.text}`);
                         window.speechSynthesis.speak(utterance);
                     }
                     
-                    // Re-render to apply the red/yellow "DUE NOW" style
+                    // Re-render to apply the red "DUE NOW" style
                     renderReminders(); 
                 }
             });
@@ -308,21 +339,22 @@
         // --- Input Handling ---
 
         /**
-         * Handles manual text input submission. THIS IS THE CORE FIX.
+         * Handles manual text input submission.
          */
         const handleManualSet = () => {
             const inputContent = REMINDER_INPUT.value.trim();
             if (!inputContent) { return; }
 
-            // Tries to match: "[task] (on|in|at) [time phrase]"
+            // Regex to find: [task] (on/in/at) [time phrase]
+            // (.+?) : Non-greedy match for the task
+            // \s+ : one or more spaces
+            // (?:on|in|at) : Non-capturing group for the keywords
+            // (.+) : The time phrase
             const match = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
 
             if (match && match.length === 3) {
                 const text = match[1].trim();
                 const timePhrase = match[2].trim();
-                
-                // Keep the input text if time parsing fails, so user can easily correct the time.
-                REMINDER_INPUT.value = text + ' ' + timePhrase; 
                 
                 const time = parseReminderTime(timePhrase);
                 
@@ -358,7 +390,7 @@
                 recognition.onstart = () => {
                     MIC_BUTTON.classList.add('listening');
                     MIC_STATUS.textContent = "Listening...";
-                    setStatus("Please say: 'Set a reminder for [task] in 5 minutes'.", false);
+                    setStatus("Say: 'Set a reminder for [task] in 5 minutes'.", false);
                 };
 
                 recognition.onresult = (event) => {
@@ -386,12 +418,11 @@
 
         /**
          * Processes the transcript from the voice command.
-         * @param {string} transcript The recognized speech.
          */
         const processVoiceCommand = (transcript) => {
             const lowerTranscript = transcript.toLowerCase();
 
-            // 1. Main Reminder Pattern (Voice Command)
+            // Main Reminder Pattern (Voice Command)
             const match = lowerTranscript.match(/set a reminder for (.+?) (?:on|in|at) (.+)/);
             
             if (match && match.length === 3) {
@@ -405,8 +436,8 @@
                 return;
             }
 
-            // 2. Fallback for Unmatched Commands
-            setStatus(`I heard "${transcript}" but I couldn't understand that command. Please try "Set a reminder for [task] in 5 seconds."`, true);
+            // Fallback for Unmatched Commands
+            setStatus(`I heard "${transcript}" but I couldn't understand the time. Please try "Set a reminder for [task] in 5 seconds."`, true);
         };
 
 
@@ -421,8 +452,11 @@
                 }
             });
 
-            // Start the main loop to check for due alarms
+            // Main logic loop (checking for triggered alarms) runs every second
             setInterval(mainLoop, 1000);
+
+            // Countdown display loop runs every half-second for smooth update
+            setInterval(updateCountdown, 500); 
 
             // Initialize speech services
             if ('speechSynthesis' in window) {
