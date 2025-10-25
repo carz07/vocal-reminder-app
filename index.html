@@ -81,7 +81,7 @@
                 <i class="fas fa-pen text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | **Dismiss: "dismiss"** | Delete: "delete"</p>
+        <p class="text-xs text-gray-400 mt-2 text-center">Set: [Task] [on/in/at] [Time Phrase] | Snooze: "snooze for 5s" | Dismiss: "dismiss" | Delete: "delete"</p>
 
         <hr class="my-8 border-gray-200">
 
@@ -456,14 +456,15 @@
             const inputContent = REMINDER_INPUT.value.trim();
             if (!inputContent) { return; }
 
-            const lowerContent = inputContent.toLowerCase();
+            const lowerContent = inputContent.toLowerCase().replace(/\s\s+/g, ' '); // Normalize spaces
             let commandHandled = false;
 
             // Find the ID of the first reminder currently due
             const dueReminder = reminders.find(r => triggeredReminders.has(r.id));
             
-            // --- 1. SNOOZE COMMAND (Manual Input) ---
-            // Pattern: "snooze (for) [time phrase]"
+            // --- 1. DUE REMINDER COMMANDS (SNOOZE, DELETE, DISMISS) ---
+
+            // Snooze Command (e.g., "snooze for 5 minutes")
             const snoozeMatch = lowerContent.match(/snooze (?:for)?\s*(.+)/);
             if (snoozeMatch) {
                 commandHandled = true;
@@ -482,9 +483,8 @@
                 }
             }
 
-            // --- 2. DELETE COMMAND (Manual Input) ---
-            // Pattern: "delete" (targets the DUE reminder)
-            else if (lowerContent.includes('delete')) {
+            // Delete Command (e.g., "delete")
+            else if (lowerContent.includes('delete') && lowerContent.length < 10) { // Keep simple words only
                 commandHandled = true;
                 if (dueReminder) {
                     deleteReminder(dueReminder.id);
@@ -494,17 +494,17 @@
                 }
             }
             
-            // --- 3. DISMISS COMMAND (Manual Input) ---
-            // Pattern: "dismissed", "dismiss", "stop" (targets the DUE reminder)
-            else if (dueReminder && (lowerContent.includes('dismiss') || lowerContent.includes('stop'))) {
+            // Dismiss Command (e.g., "dismissed", "dismiss", "stop")
+            else if (dueReminder && (lowerContent.includes('dismiss') || lowerContent.includes('stop')) && lowerContent.length < 10) {
                 commandHandled = true;
                 dismissReminder(dueReminder.id);
                 REMINDER_INPUT.value = '';
             }
 
-            // --- 4. NEW REMINDER COMMAND ---
+            // --- 2. NEW REMINDER COMMAND ---
             if (!commandHandled) {
                 // Regex for NEW reminder: [task] (on/in/at) [time phrase]
+                // Improved regex to allow task to be anything before the connector word
                 const newReminderMatch = inputContent.match(/(.+?)\s+(?:on|in|at)\s+(.+)/i);
 
                 if (newReminderMatch && newReminderMatch.length === 3) {
@@ -516,14 +516,14 @@
                     if (time) {
                         addReminder(text, time);
                         REMINDER_INPUT.value = ''; 
-                        commandHandled = true; // Set handled since a new reminder was successfully set
+                        commandHandled = true;
                     }
                 } 
                 
                 // If it wasn't handled and fell through to here, show a generic error
                 if (!commandHandled) {
-                    // Updated error message to be more helpful
-                    setStatus("Could not understand the input. Commands are: 'snooze', 'delete', 'dismiss' (when due), or [Task] [Time Phrase] (to set a new one).", true);
+                    // This is the primary error message for manual input failure.
+                    setStatus("Could not understand the input. Please use one of the commands: **'snooze'**, **'delete'**, **'dismiss'** (when due), or use the format: **[Task] [on/in/at] [Time Phrase]**.", true);
                 }
             }
         };
@@ -629,7 +629,8 @@
             }
             
             // 4. Main Reminder Pattern (New Reminder)
-            const newReminderMatch = lowerTranscript.match(/(?:set a reminder for|remind me to) (.+?) (?:on|in|at) (.+)/);
+            // Accepts: "set a reminder for [task] in [time]" OR "remind me to [task] at [time]"
+            const newReminderMatch = lowerTranscript.match(/(?:set a reminder for|remind me to)\s+(.+?)\s+(?:on|in|at)\s+(.+)/);
             
             if (newReminderMatch && newReminderMatch.length >= 3) {
                 const text = newReminderMatch[1].trim(); 
