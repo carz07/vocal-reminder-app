@@ -20,6 +20,7 @@
             width: 100%;
             max-width: 550px;
             margin-top: 3rem;
+            margin-bottom: 3rem;
             background: white;
             border-radius: 1.5rem;
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
@@ -96,6 +97,16 @@
             justify-content: space-between;
             align-items: center;
         }
+        .history-item {
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            background-color: #f1f5f9;
+            border-left: 5px solid #94a3b8;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            opacity: 0.8;
+        }
         .delete-button {
             background-color: #f56565;
             color: white;
@@ -105,6 +116,14 @@
             font-weight: 600;
             transition: background-color 0.2s;
             line-height: 1;
+        }
+        .clear-history-button {
+            font-size: 0.75rem;
+            color: #ef4444;
+            text-decoration: underline;
+            cursor: pointer;
+            background: none;
+            border: none;
         }
         .reminder-alerting {
             background-color: #fee2e2;
@@ -146,11 +165,18 @@
         </div>
 
         <h2 class="text-xl font-bold text-gray-900 mb-3">Pending Reminders (<span id="reminderCount">0</span>)</h2>
-        <div id="reminderListContainer" class="space-y-3"></div>
+        <div id="reminderListContainer" class="space-y-3 mb-8"></div>
+
+        <div class="flex justify-between items-center mb-3">
+            <h2 class="text-lg font-bold text-gray-700">History</h2>
+            <button id="clearHistoryBtn" class="clear-history-button">Clear History</button>
+        </div>
+        <div id="historyListContainer" class="space-y-2 opacity-70"></div>
     </div>
 
     <script>
         let reminderList = [];
+        let reminderHistory = [];
         let reminderIdCounter = Date.now();
         let isListening = false;
 
@@ -251,27 +277,33 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
 
-            // 1. CLEAR ALL
+            // 1. CLEAR HISTORY COMMAND
+            if (low === 'clear history' || low === 'delete history' || low === 'remove history' || low === 'empty history') {
+                reminderHistory = [];
+                render();
+                return;
+            }
+
+            // 2. CLEAR ALL PENDING
             if (low === 'delete all' || low === 'clear all' || low === 'remove all') {
+                reminderList.forEach(r => moveToHistory(r));
                 reminderList = [];
                 render();
                 return;
             }
 
-            // 2. DISMISS / STOP ALERTING REMINDER
+            // 3. DISMISS / STOP ALERTING REMINDER
             if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('cancel') || low.includes('done') || low.includes('delete'))) {
                 internalDeleteReminder(alerting.id); 
                 render();
                 return; 
             }
 
-            // 3. TARGETED DELETION (Check if user mentioned any current task name)
+            // 4. TARGETED DELETION
             const deleteKeywords = ['delete', 'remove', 'dismiss', 'cancel', 'clear'];
             const isDeletionCommand = deleteKeywords.some(kw => low.includes(kw));
             
             if (isDeletionCommand) {
-                // Try to find the reminder that matches the spoken words
-                // We sort by length descending to catch longer phrases first (e.g., "drink water" vs "water")
                 const sortedReminders = [...reminderList].sort((a, b) => b.task.length - a.task.length);
                 for (const r of sortedReminders) {
                     if (low.includes(r.task.toLowerCase())) {
@@ -282,7 +314,7 @@
                 }
             }
 
-            // 4. SNOOZE ALERT
+            // 5. SNOOZE ALERT
             if (alerting && low.includes('snooze')) {
                 const parts = low.split('snooze');
                 const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
@@ -296,16 +328,17 @@
                 return;
             }
 
-            // 5. FALLBACK SIMPLE DELETE (If just "delete" or "remove" said with no match)
+            // 6. FALLBACK SIMPLE DELETE
             if (low === 'delete' || low === 'remove') {
                 if (reminderList.length > 0) {
-                    reminderList.pop();
+                    const last = reminderList.pop();
+                    moveToHistory(last);
                     render();
                 }
                 return;
             }
 
-            // 6. CREATE NEW REMINDER
+            // 7. CREATE NEW REMINDER
             const timeRegex = /((\d+\s*\w*\s*(seconds?|s|minutes?|m|hours?|hr?|h|days?|d)(\s+from\s+now)?)|(tomorrow|today|on\s+\w+)\s*.*|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|\s*from\s+now|now)$/i;
             const match = val.match(timeRegex);
             if (match) {
@@ -325,12 +358,23 @@
             }
         }
 
+        function moveToHistory(reminder) {
+            reminderHistory.unshift({
+                ...reminder,
+                completedAt: Date.now()
+            });
+            if (reminderHistory.length > 50) reminderHistory.pop();
+        }
+
         function internalDeleteReminder(id) {
+            const reminder = reminderList.find(r => r.id === id);
+            if (reminder) moveToHistory(reminder);
             reminderList = reminderList.filter(r => r.id !== id);
         }
 
         function render() {
             const container = document.getElementById('reminderListContainer');
+            const historyContainer = document.getElementById('historyListContainer');
             const pendingCount = reminderList.length;
             document.getElementById('reminderCount').textContent = pendingCount;
 
@@ -347,9 +391,28 @@
                     </div>
                 `;
             }).join('');
+
+            if (reminderList.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-400 py-4 italic">No pending reminders.</p>`;
+            }
+
+            historyContainer.innerHTML = reminderHistory.map(h => {
+                const date = new Date(h.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return `
+                    <div class="history-item">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">${h.task}</p>
+                            <p class="text-[10px] text-gray-400">${date}</p>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            if (reminderHistory.length === 0) {
+                historyContainer.innerHTML = `<p class="text-center text-gray-400 text-xs py-2 italic">History is empty.</p>`;
+            }
         }
 
-        // Voice Recognition Singleton
         let recognition = null;
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
@@ -381,7 +444,6 @@
             }
         }
 
-        // Core Loop
         setInterval(() => {
             const now = Date.now();
             let alertingNow = false;
@@ -407,6 +469,10 @@
         document.getElementById('sendButton').onclick = () => handleInput(document.getElementById('commandInput').value);
         document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
         document.getElementById('micButton').onclick = () => triggerVoice();
+        document.getElementById('clearHistoryBtn').onclick = () => {
+            reminderHistory = [];
+            render();
+        };
 
         window.deleteReminder = (id) => { 
             internalDeleteReminder(id); 
