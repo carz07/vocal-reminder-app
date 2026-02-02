@@ -41,13 +41,16 @@
             box-shadow: 0 8px 15px rgba(90, 103, 216, 0.5);
             transition: all 0.2s ease;
             border: none;
+            position: relative;
+            z-index: 10;
         }
         .mic-button:hover {
             background-color: #4c51bf;
             transform: scale(1.05);
         }
         .mic-button.listening {
-            animation: pulse-ring-purple 1.5s infinite;
+            background-color: #434190;
+            animation: pulse-ring-purple 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
         .mic-icon {
             width: 40px;
@@ -118,6 +121,17 @@
             transition: background-color 0.2s;
             line-height: 1;
         }
+        .snooze-button {
+            background-color: #ed8936;
+            color: white;
+            padding: 0.4rem 0.6rem;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+            transition: background-color 0.2s;
+            line-height: 1;
+        }
         .clear-history-button {
             font-size: 0.75rem;
             color: #ef4444;
@@ -160,13 +174,46 @@
         .toast.show {
             opacity: 1;
         }
+        .countdown-badge {
+            font-family: monospace;
+            background: #ebf4ff;
+            color: #2b6cb0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            width: 90%;
+            max-width: 400px;
+        }
+
         @keyframes pulse-ring-red {
             0%, 100% { box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.4); }
-            50% { box-shadow: 0 0 0 8px rgba(229, 62, 62, 0); }
+            50% { box-shadow: 0 0 0 12px rgba(229, 62, 62, 0); }
         }
         @keyframes pulse-ring-purple {
-            0% { box-shadow: 0 0 0 0 rgba(90, 103, 216, 0.4); }
-            70% { box-shadow: 0 0 0 15px rgba(90, 103, 216, 0); }
+            0% { box-shadow: 0 0 0 0 rgba(90, 103, 216, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(90, 103, 216, 0); }
             100% { box-shadow: 0 0 0 0 rgba(90, 103, 216, 0); }
         }
     </style>
@@ -180,8 +227,7 @@
             </svg>
         </button>
 
-        <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-2">Vocal & Manual Reminder App</h1>
-        <p id="authStatus" class="text-xs text-center text-gray-400 mb-6">Initializing storage...</p>
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-6">Vocal & Manual Reminder App</h1>
 
         <div class="text-center">
             <button id="micButton" class="mic-button" title="Voice Command">
@@ -193,7 +239,7 @@
         </div>
 
         <div class="input-group">
-            <input type="text" id="commandInput" class="input-field" placeholder="e.g., call Berts next week">
+            <input type="text" id="commandInput" class="input-field" placeholder="remind me in 5 minutes to...">
             <button id="sendButton" class="set-button" title="Set Reminder">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -211,6 +257,26 @@
         <div id="historyListContainer" class="space-y-2 opacity-70"></div>
     </div>
 
+    <div id="snoozeModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-bold mb-4">Snooze for how long?</h3>
+            <div class="flex gap-4 mb-6">
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-500 mb-1">Hours</label>
+                    <input type="number" id="snoozeHours" min="0" value="0" class="w-full p-2 border rounded">
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-500 mb-1">Minutes</label>
+                    <input type="number" id="snoozeMins" min="0" value="5" class="w-full p-2 border rounded">
+                </div>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button id="cancelSnooze" class="px-4 py-2 text-gray-500">Cancel</button>
+                <button id="confirmSnooze" class="px-4 py-2 bg-indigo-600 text-white rounded font-bold">Set Snooze</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast" class="toast">Link copied to clipboard!</div>
 
     <script type="module">
@@ -218,13 +284,12 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, query, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Logic for handling missing Firebase config (Local Fallback)
         let config = {};
         let useCloud = false;
         try {
             config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
             if (config.apiKey) useCloud = true;
-        } catch(e) { console.error("Config parse error", e); }
+        } catch(e) { }
         
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'vocal-reminder-app-v1';
 
@@ -233,8 +298,8 @@
         let reminderList = [];
         let reminderHistory = [];
         let isListening = false;
+        let activeSnoozeReminderId = null;
 
-        // LOCAL STORAGE FALLBACK HELPERS
         const getLocal = (key) => JSON.parse(localStorage.getItem(`${appId}_${key}`) || '[]');
         const setLocal = (key, data) => localStorage.setItem(`${appId}_${key}`, JSON.stringify(data));
 
@@ -250,28 +315,18 @@
                     } else {
                         await signInAnonymously(auth);
                     }
-                } catch (err) {
-                    switchToLocal("Connection Failed");
-                    console.error("Auth error:", err);
-                }
+                } catch (err) { switchToLocal(); }
             };
             initAuth();
 
             onAuthStateChanged(auth, (user) => {
                 currentUser = user;
-                if (user) {
-                    document.getElementById('authStatus').textContent = `Cloud Storage: Active (UID: ${user.uid.substring(0,8)}...)`;
-                    setupCloudListeners(user.uid);
-                }
+                if (user) { setupCloudListeners(user.uid); }
             });
-        } else {
-            switchToLocal("Missing Firebase Config");
-        }
+        } else { switchToLocal(); }
 
-        function switchToLocal(reason) {
+        function switchToLocal() {
             useCloud = false;
-            document.getElementById('authStatus').textContent = `Offline Storage: Active (${reason})`;
-            document.getElementById('authStatus').style.color = "#4a5568";
             reminderList = getLocal('reminders');
             reminderHistory = getLocal('history');
             render();
@@ -282,29 +337,23 @@
             onSnapshot(remindersRef, (snapshot) => {
                 reminderList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 render();
-            }, (err) => switchToLocal("Snapshot Error"));
+            });
 
             const historyRef = collection(db, 'artifacts', appId, 'users', userId, 'history');
             onSnapshot(historyRef, (snapshot) => {
                 reminderHistory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
                     .sort((a, b) => b.completedAt - a.completedAt);
                 render();
-            }, (err) => switchToLocal("History Error"));
+            });
         }
 
         async function addReminder(task, targetTime) {
-            const newReminder = {
-                task,
-                targetTime,
-                creationTime: Date.now(),
-                isAlerting: false
-            };
-
+            const newReminder = { task, targetTime, creationTime: Date.now(), isAlerting: false };
             if (useCloud && currentUser) {
                 try {
                     const remindersRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders');
                     await addDoc(remindersRef, newReminder);
-                } catch (err) { console.error("Cloud Add error:", err); }
+                } catch (err) { }
             } else {
                 newReminder.id = Date.now().toString();
                 reminderList.push(newReminder);
@@ -320,7 +369,7 @@
                     const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
                     await addDoc(historyRef, historyEntry);
                     await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id));
-                } catch (err) { console.error("Cloud History move error:", err); }
+                } catch (err) { }
             } else {
                 reminderHistory.unshift(historyEntry);
                 reminderList = reminderList.filter(r => r.id !== reminder.id);
@@ -330,9 +379,41 @@
             }
         }
 
+        async function snoozeReminder(reminder, customTimeMs = null) {
+            const snoozeDuration = customTimeMs || (5 * 60 * 1000);
+            const newTime = Date.now() + snoozeDuration;
+            const updates = { targetTime: newTime, isAlerting: false };
+            if (useCloud && currentUser) {
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id), updates);
+                } catch(e) {}
+            } else {
+                const idx = reminderList.findIndex(r => r.id === reminder.id);
+                if (idx !== -1) {
+                    reminderList[idx] = { ...reminderList[idx], ...updates };
+                    setLocal('reminders', reminderList);
+                    render();
+                }
+            }
+        }
+
+        async function clearAllPending() {
+            if (useCloud && currentUser) {
+                for (const r of reminderList) {
+                    try { await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', r.id)); } catch(e) {}
+                }
+            } else {
+                reminderList = [];
+                setLocal('reminders', []);
+                render();
+            }
+        }
+
         async function updateReminderAlert(id, updates) {
             if (useCloud && currentUser) {
-                await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', id), updates);
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', id), updates);
+                } catch(e) {}
             } else {
                 const idx = reminderList.findIndex(r => r.id === id);
                 if (idx !== -1) {
@@ -346,7 +427,7 @@
         async function clearHistory() {
             if (useCloud && currentUser) {
                 for (const h of reminderHistory) {
-                    await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id));
+                    try { await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id)); } catch(e) {}
                 }
             } else {
                 reminderHistory = [];
@@ -355,101 +436,134 @@
             }
         }
 
-        /**
-         * Enhanced Time Parsing Logic
-         */
+        function textToNumber(text) {
+            if (!text) return NaN;
+            const map = { 
+                'a': 1, 'an': 1, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 
+                'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+                'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50
+            };
+            const lower = text.toLowerCase();
+            return map[lower] !== undefined ? map[lower] : parseInt(text);
+        }
+
         function parseTimePhrase(phrase, baseDate = new Date()) {
             phrase = phrase.trim().toLowerCase();
             const target = new Date(baseDate);
-            target.setSeconds(0, 0);
-
-            // 1. Day of week detection (monday, tuesday, etc.)
-            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-            let dayIndex = -1;
-            days.forEach((d, i) => { if(phrase.includes(d)) dayIndex = i; });
-
-            if (dayIndex !== -1) {
-                const isNextWeek = phrase.includes('next week');
-                let daysToAdd = (dayIndex + 7 - target.getDay()) % 7;
-                
-                // If today is Friday and user says "Friday", it means next week unless specified
-                if (daysToAdd === 0 && (isNextWeek || phrase.includes('next'))) daysToAdd = 7;
-                else if (isNextWeek) daysToAdd += 7;
-                else if (daysToAdd === 0) daysToAdd = 7; // Default "Friday" to next Friday if today is Friday
-
-                target.setDate(target.getDate() + daysToAdd);
-                target.setHours(9, 0, 0, 0); // Default to 9 AM
-                return target;
-            }
-
-            // 2. "Next week" (General)
-            if (phrase.includes('next week')) {
-                target.setDate(target.getDate() + 7);
-                target.setHours(9, 0, 0, 0);
-                return target;
-            }
-
-            // 3. Relative "in X minutes/hours"
-            const relMatch = phrase.match(/(\d+|a|an|one)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)/i);
+            
+            const relMatch = phrase.match(/(?:in|after|for|by)\s+(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty)\s*(more\s*)?(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)/i) 
+                          || phrase.match(/(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty)\s*(more\s*)?(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)\s+(?:from now|later)/i);
+            
             if (relMatch) {
-                let val = (['a','an','one'].includes(relMatch[1])) ? 1 : parseInt(relMatch[1]);
-                const unit = relMatch[2][0].toLowerCase();
-                if (unit === 's') target.setSeconds(target.getSeconds() + val);
-                else if (unit === 'm') target.setMinutes(target.getMinutes() + val);
-                else if (unit === 'h') target.setHours(target.getHours() + val);
-                else if (unit === 'd') target.setDate(target.getDate() + val);
+                let val = textToNumber(relMatch[1]);
+                if (isNaN(val)) val = 1;
+                const unit = relMatch[3].toLowerCase();
+                
+                if (unit.startsWith('s')) return new Date(Date.now() + (val * 1000));
+                
+                target.setSeconds(0, 0);
+                if (unit.startsWith('m')) target.setMinutes(target.getMinutes() + val);
+                else if (unit.startsWith('h')) target.setHours(target.getHours() + val);
+                else if (unit.startsWith('d')) target.setDate(target.getDate() + val);
                 return target;
             }
 
-            // 4. "Tomorrow"
             if (phrase.includes('tomorrow')) { 
+                target.setSeconds(0, 0);
                 target.setDate(target.getDate() + 1); 
                 target.setHours(9, 0, 0, 0); 
                 return target; 
             }
             
-            // 5. Default fallback (1 minute from now)
-            return new Date(Date.now() + 60000);
+            return null;
         }
 
         function handleInput(raw) {
             const val = raw.trim();
             if (!val) return;
             document.getElementById('commandInput').value = '';
-            
             const low = val.toLowerCase();
-            const alerting = reminderList.find(r => r.isAlerting);
-            if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('done'))) {
-                moveToHistory(alerting);
-                return; 
+
+            if (low.includes('clear history')) {
+                clearHistory();
+                return;
             }
 
-            const target = parseTimePhrase(val);
+            if (low.includes('clear all') || low.includes('delete all') || low.includes('remove all')) {
+                clearAllPending();
+                return;
+            }
+
+            const clearMatch = low.match(/^(clear|delete|remove)\s+(.+)$/);
+            if (clearMatch) {
+                const taskToClear = clearMatch[2].trim();
+                const found = reminderList.find(r => r.task.toLowerCase().includes(taskToClear));
+                if (found) {
+                    moveToHistory(found);
+                    return;
+                }
+            }
+
+            const alerting = reminderList.find(r => r.isAlerting);
+            if (alerting) {
+                if (low.includes('dismiss') || low.includes('stop') || low.includes('done') || low.includes('delete')) {
+                    moveToHistory(alerting);
+                    return; 
+                }
+                if (low.includes('snooze')) {
+                    // Look for durations like "snooze for a minute" or "snooze for 10 minutes"
+                    const snoozeTime = parseTimePhrase(low);
+                    if (snoozeTime) {
+                        const ms = snoozeTime.getTime() - Date.now();
+                        if (ms > 0) { snoozeReminder(alerting, ms); return; }
+                    }
+                    snoozeReminder(alerting);
+                    return;
+                }
+            }
+            
+            const target = parseTimePhrase(val) || new Date(Date.now() + 60000);
             addReminder(val, target.getTime());
+        }
+
+        function getCountdown(targetTime) {
+            const diff = targetTime - Date.now();
+            if (diff <= 0) return "00:00:00";
+            const hours = Math.floor(diff / 3600000);
+            const minutes = Math.floor((diff % 3600000) / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+            return [hours, minutes, seconds].map(v => v.toString().padStart(2, '0')).join(':');
         }
 
         function render() {
             const container = document.getElementById('reminderListContainer');
             const historyContainer = document.getElementById('historyListContainer');
             document.getElementById('reminderCount').textContent = reminderList.length;
-
-            // Sort pending reminders by time
             const sortedList = [...reminderList].sort((a, b) => a.targetTime - b.targetTime);
+            const now = Date.now();
 
             container.innerHTML = sortedList.map(r => {
                 const dateObj = new Date(r.targetTime);
-                const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 const dateStr = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                
+                const diffMs = r.targetTime - now;
+                const isSoon = diffMs > 0 && diffMs < 21600000;
+
                 return `
                 <div class="reminder-item ${r.isAlerting ? 'reminder-alerting' : ''}">
                     <div class="flex-grow min-w-0 pr-4">
-                        <p class="font-semibold text-gray-800 truncate">${r.task}</p>
+                        <div class="flex items-center gap-2 mb-1">
+                            <p class="font-semibold text-gray-800 truncate">${r.task}</p>
+                            ${isSoon && !r.isAlerting ? `<span class="countdown-badge" id="cd-${r.id}">${getCountdown(r.targetTime)}</span>` : ''}
+                        </div>
                         <p class="text-xs ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">
                             ${r.isAlerting ? 'Alerting!' : dateStr + ' @ ' + timeStr}
                         </p>
                     </div>
-                    <button class="delete-btn-action delete-button" data-id="${r.id}">Done</button>
+                    <div class="flex shrink-0">
+                        ${r.isAlerting ? `<button class="snooze-btn-trigger snooze-button" data-id="${r.id}">Snooze</button>` : ''}
+                        <button class="delete-btn-action delete-button" data-id="${r.id}">Done</button>
+                    </div>
                 </div>
             `}).join('');
 
@@ -457,6 +571,13 @@
                 btn.onclick = () => {
                     const r = reminderList.find(x => x.id === btn.dataset.id);
                     if (r) moveToHistory(r);
+                };
+            });
+
+            document.querySelectorAll('.snooze-btn-trigger').forEach(btn => {
+                btn.onclick = () => {
+                    activeSnoozeReminderId = btn.dataset.id;
+                    document.getElementById('snoozeModal').classList.add('active');
                 };
             });
 
@@ -468,30 +589,73 @@
             `).join('');
         }
 
+        document.getElementById('cancelSnooze').onclick = () => {
+            document.getElementById('snoozeModal').classList.remove('active');
+            activeSnoozeReminderId = null;
+        };
+
+        document.getElementById('confirmSnooze').onclick = () => {
+            const h = parseInt(document.getElementById('snoozeHours').value) || 0;
+            const m = parseInt(document.getElementById('snoozeMins').value) || 0;
+            const ms = (h * 3600000) + (m * 60000);
+            const r = reminderList.find(x => x.id === activeSnoozeReminderId);
+            if (r && ms > 0) { snoozeReminder(r, ms); }
+            document.getElementById('snoozeModal').classList.remove('active');
+            activeSnoozeReminderId = null;
+        };
+
         let recognition = null;
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
-            recognition.onstart = () => { isListening = true; document.getElementById('micButton').classList.add('listening'); };
-            recognition.onend = () => { isListening = false; document.getElementById('micButton').classList.remove('listening'); };
-            recognition.onresult = (e) => handleInput(e.results[0][0].transcript);
+            recognition.continuous = false; 
+            recognition.interimResults = false;
+            recognition.onstart = () => { 
+                isListening = true; 
+                document.getElementById('micButton').classList.add('listening'); 
+                document.getElementById('micStatus').textContent = "Listening...";
+            };
+            recognition.onend = () => { 
+                isListening = false; 
+                document.getElementById('micButton').classList.remove('listening'); 
+                document.getElementById('micStatus').textContent = "\u00A0";
+            };
+            recognition.onresult = (e) => {
+                const transcript = e.results[0][0].transcript;
+                handleInput(transcript);
+            };
+            recognition.onerror = (e) => {
+                document.getElementById('micButton').classList.remove('listening');
+            }
         }
 
-        document.getElementById('micButton').addEventListener('click', () => {
-            if (recognition && !isListening) recognition.start();
-        });
+        function startMic() {
+            if (recognition && !isListening) {
+                try { recognition.start(); } catch(e) {}
+            }
+        }
 
+        document.getElementById('micButton').addEventListener('click', startMic);
         document.getElementById('sendButton').addEventListener('click', () => handleInput(document.getElementById('commandInput').value));
         document.getElementById('commandInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleInput(e.target.value); });
         document.getElementById('clearHistoryBtn').addEventListener('click', clearHistory);
         
         setInterval(() => {
             const now = Date.now();
+            let stateChanged = false;
+            let newlyAlerting = false;
             reminderList.forEach(r => {
-                if (r.targetTime <= now && !r.isAlerting) updateReminderAlert(r.id, { isAlerting: true });
+                if (r.targetTime <= now && !r.isAlerting) {
+                    updateReminderAlert(r.id, { isAlerting: true });
+                    stateChanged = true;
+                    newlyAlerting = true;
+                }
+                const cdElem = document.getElementById(`cd-${r.id}`);
+                if (cdElem) { cdElem.textContent = getCountdown(r.targetTime); }
             });
-        }, 5000);
+            if (newlyAlerting && !isListening) startMic(); 
+            if (stateChanged && !useCloud) render(); 
+        }, 1000);
 
-        // Share functionality
         document.getElementById('shareBtn').onclick = () => {
             const url = window.location.href;
             const tempInput = document.createElement('input');
@@ -500,7 +664,6 @@
             tempInput.select();
             document.execCommand('copy');
             document.body.removeChild(tempInput);
-            
             const toast = document.getElementById('toast');
             toast.classList.add('show');
             setTimeout(() => toast.classList.remove('show'), 3000);
