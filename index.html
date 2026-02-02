@@ -304,10 +304,12 @@
 
         async function clearHistoryDb() {
             if (!currentUser) return;
-            reminderHistory.forEach(async (h) => {
-                const historyDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id);
-                await deleteDoc(historyDoc);
-            });
+            for (const h of reminderHistory) {
+                try {
+                    const historyDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id);
+                    await deleteDoc(historyDoc);
+                } catch (e) { console.error(e); }
+            }
         }
 
         function parseTimePhrase(phrase, baseDate = new Date()) {
@@ -317,7 +319,6 @@
             const target = new Date(baseDate);
             target.setSeconds(0, 0);
 
-            // Updated rule: "next week" is exactly 7 days from now
             if (phrase.includes('next week')) {
                 const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
                 const dayMatch = days.find(d => phrase.includes(d));
@@ -327,19 +328,15 @@
                     const targetDayIndex = days.indexOf(dayMatch);
                     let diff = targetDayIndex - currentDay;
                     if (diff <= 0) diff += 7;
-                    // For "next week Tuesday", we go to the next week's day
                     target.setDate(target.getDate() + diff + 7);
                     target.setHours(9, 0, 0, 0);
                     return target;
                 } else {
-                    // "next week" alone = exactly 7 days (168 hours) from now
                     target.setDate(target.getDate() + 7);
-                    // Keep current time or default to 9am if strictly requested
                     return target;
                 }
             }
 
-            // Clean phrase for relative units
             let relaxed = phrase
                 .replace(/^(for|in|from|at|on|next)\s+/, '')
                 .replace(/\s+more\s+/, ' ')
@@ -420,7 +417,6 @@
                 return; 
             }
 
-            // Match keywords for time splitting
             const timeKeywords = /(next week|tomorrow|today|at \d|in \d|from now|a day|an hour|one minute|on \w+day)/i;
             const match = val.match(timeKeywords);
             
@@ -446,19 +442,28 @@
             const historyContainer = document.getElementById('historyListContainer');
             document.getElementById('reminderCount').textContent = reminderList.length;
 
-            container.innerHTML = reminderList.map(r => {
-                const alertClass = r.isAlerting ? 'reminder-alerting' : '';
+            container.innerHTML = '';
+            reminderList.forEach(r => {
+                const div = document.createElement('div');
+                div.className = `reminder-item ${r.isAlerting ? 'reminder-alerting' : ''}`;
+                
                 const timeStr = r.isAlerting ? 'Alerting!' : formatTime(r.targetTime);
-                return `
-                    <div class="reminder-item ${alertClass}">
-                        <div class="flex-grow min-w-0 pr-4">
-                            <p class="font-semibold text-gray-800 truncate">${r.task}</p>
-                            <p class="text-xs ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">${timeStr}</p>
-                        </div>
-                        <button class="delete-button shrink-0" onclick="window.deleteReminder('${r.id}')">Delete</button>
+                
+                div.innerHTML = `
+                    <div class="flex-grow min-w-0 pr-4">
+                        <p class="font-semibold text-gray-800 truncate">${r.task}</p>
+                        <p class="text-xs ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">${timeStr}</p>
                     </div>
                 `;
-            }).join('');
+                
+                const delBtn = document.createElement('button');
+                delBtn.className = 'delete-button shrink-0';
+                delBtn.textContent = 'Delete';
+                delBtn.onclick = () => moveToHistoryDb(r);
+                
+                div.appendChild(delBtn);
+                container.appendChild(div);
+            });
 
             if (reminderList.length === 0) {
                 container.innerHTML = `<p class="text-center text-gray-400 py-4 italic">No pending reminders.</p>`;
@@ -488,7 +493,7 @@
 
         function triggerVoice() {
             if (recognition && !isListening) {
-                try { recognition.start(); } catch(e) {}
+                try { recognition.start(); } catch(e) { console.error(e); }
             }
         }
 
@@ -509,19 +514,31 @@
             render();
         }, 1000);
 
-        document.getElementById('sendButton').onclick = () => handleInput(document.getElementById('commandInput').value);
-        document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
-        document.getElementById('micButton').onclick = () => triggerVoice();
-        document.getElementById('clearHistoryBtn').onclick = () => clearHistoryDb();
-        document.getElementById('shareBtn').onclick = () => {
-            const t = document.createElement("textarea"); t.value = window.location.href; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
-            const toast = document.getElementById('toast'); toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2000);
-        };
+        // Explicitly attach listeners for robust execution in module environment
+        document.getElementById('sendButton').addEventListener('click', () => {
+            handleInput(document.getElementById('commandInput').value);
+        });
 
-        window.deleteReminder = (id) => { 
-            const reminder = reminderList.find(r => r.id === id);
-            if (reminder) moveToHistoryDb(reminder); 
-        };
+        document.getElementById('commandInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleInput(e.target.value);
+        });
+
+        document.getElementById('micButton').addEventListener('click', triggerVoice);
+        
+        document.getElementById('clearHistoryBtn').addEventListener('click', clearHistoryDb);
+        
+        document.getElementById('shareBtn').addEventListener('click', () => {
+            const t = document.createElement("textarea"); 
+            t.value = window.location.href; 
+            document.body.appendChild(t); 
+            t.select(); 
+            document.execCommand('copy'); 
+            document.body.removeChild(t);
+            const toast = document.getElementById('toast'); 
+            toast.classList.add('show'); 
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        });
+
     </script>
 </body>
 </html>
