@@ -181,7 +181,8 @@
             </svg>
         </button>
 
-        <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-6">Vocal & Manual Reminder App</h1>
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center mb-2">Vocal & Manual Reminder App</h1>
+        <p id="authStatus" class="text-xs text-center text-gray-400 mb-6">Initializing storage...</p>
 
         <div class="text-center">
             <button id="micButton" class="mic-button" title="Voice Command">
@@ -213,13 +214,112 @@
 
     <div id="toast" class="toast">Link copied to clipboard!</div>
 
-    <script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, query, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'vocal-reminder-app';
+
         let reminderList = [];
         let reminderHistory = [];
-        let reminderIdCounter = Date.now();
         let isListening = false;
+        let currentUser = null;
 
-        function generateId() { return `r-${reminderIdCounter++}`; }
+        // AUTHENTICATION (RULE 3)
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth error:", err);
+                document.getElementById('authStatus').textContent = "Connection error. Retrying...";
+            }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                document.getElementById('authStatus').textContent = `Syncing enabled (UID: ${user.uid.substring(0,8)}...)`;
+                setupListeners(user.uid);
+            }
+        });
+
+        // FIRESTORE LISTENERS (RULE 1 & 2)
+        function setupListeners(userId) {
+            // Pending Reminders
+            const remindersRef = collection(db, 'artifacts', appId, 'users', userId, 'reminders');
+            onSnapshot(remindersRef, (snapshot) => {
+                reminderList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                render();
+            }, (err) => console.error("Snapshot error:", err));
+
+            // History
+            const historyRef = collection(db, 'artifacts', appId, 'users', userId, 'history');
+            onSnapshot(historyRef, (snapshot) => {
+                reminderHistory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                    .sort((a, b) => b.completedAt - a.completedAt); // Sort in memory (Rule 2)
+                render();
+            }, (err) => console.error("History error:", err));
+        }
+
+        async function addReminderToDb(task, targetTime) {
+            if (!currentUser) return;
+            try {
+                const remindersRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders');
+                await addDoc(remindersRef, {
+                    task,
+                    targetTime,
+                    creationTime: Date.now(),
+                    isAlerting: false,
+                    hasAlerted: false
+                });
+            } catch (err) { console.error("Add error:", err); }
+        }
+
+        async function moveToHistoryDb(reminder) {
+            if (!currentUser) return;
+            try {
+                // Add to history
+                const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
+                await addDoc(historyRef, {
+                    task: reminder.task,
+                    completedAt: Date.now()
+                });
+                // Delete from pending
+                const reminderDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id);
+                await deleteDoc(reminderDoc);
+            } catch (err) { console.error("History move error:", err); }
+        }
+
+        async function updateReminderInDb(id, updates) {
+            if (!currentUser) return;
+            try {
+                const reminderDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', id);
+                await updateDoc(reminderDoc, updates);
+            } catch (err) { console.error("Update error:", err); }
+        }
+
+        async function clearHistoryDb() {
+            if (!currentUser) return;
+            // Note: Batch delete or simple loops for small datasets (Rule 2)
+            reminderHistory.forEach(async (h) => {
+                const historyDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id);
+                await deleteDoc(historyDoc);
+            });
+        }
+
+        // --- UI & LOGIC ---
 
         function showToast(message) {
             const toast = document.getElementById('toast');
@@ -233,12 +333,8 @@
             textArea.value = text;
             document.body.appendChild(textArea);
             textArea.select();
-            try {
-                document.execCommand('copy');
-                showToast("Link copied to clipboard!");
-            } catch (err) {
-                showToast("Failed to copy link");
-            }
+            document.execCommand('copy');
+            showToast("Link copied to clipboard!");
             document.body.removeChild(textArea);
         }
 
@@ -274,15 +370,10 @@
                 const unitStr = relMatch[2].toLowerCase();
                 const d = new Date(baseDate.getTime());
                 
-                if (unitStr.startsWith('s')) {
-                    d.setSeconds(d.getSeconds() + val);
-                } else if (unitStr.startsWith('m')) {
-                    d.setMinutes(d.getMinutes() + val);
-                } else if (unitStr.startsWith('h')) {
-                    d.setHours(d.getHours() + val);
-                } else if (unitStr.startsWith('d')) {
-                    d.setDate(d.getDate() + val);
-                }
+                if (unitStr.startsWith('s')) d.setSeconds(d.getSeconds() + val);
+                else if (unitStr.startsWith('m')) d.setMinutes(d.getMinutes() + val);
+                else if (unitStr.startsWith('h')) d.setHours(d.getHours() + val);
+                else if (unitStr.startsWith('d')) d.setDate(d.getDate() + val);
                 return d;
             }
 
@@ -291,7 +382,6 @@
             let explicit = false;
 
             if (phrase.includes('tomorrow')) { target.setDate(target.getDate() + 1); explicit = true; }
-            
             const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             const dayMatch = days.find(d => phrase.includes(d));
             if (dayMatch) {
@@ -318,8 +408,8 @@
             return null;
         }
 
-        function formatTime(reminder) {
-            const diff = reminder.targetTime - Date.now();
+        function formatTime(targetTime) {
+            const diff = targetTime - Date.now();
             if (diff < 0) return 'Overdue';
             const s = Math.floor(diff / 1000);
             if (s < 60) return `in ${s}s`;
@@ -337,110 +427,64 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
 
-            // 1. CLEAR HISTORY COMMAND
-            if (low === 'clear history' || low === 'delete history' || low === 'remove history' || low === 'empty history') {
-                reminderHistory = [];
-                render();
+            if (low === 'clear history' || low === 'delete history') {
+                clearHistoryDb();
                 return;
             }
 
-            // 2. CLEAR ALL PENDING
-            if (low === 'delete all' || low === 'clear all' || low === 'remove all') {
-                reminderList.forEach(r => moveToHistory(r));
-                reminderList = [];
-                render();
+            if (low === 'delete all' || low === 'clear all') {
+                reminderList.forEach(r => moveToHistoryDb(r));
                 return;
             }
 
-            // 3. DISMISS / STOP ALERTING REMINDER
-            if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('cancel') || low.includes('done') || low.includes('delete'))) {
-                internalDeleteReminder(alerting.id); 
-                render();
+            if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('done'))) {
+                moveToHistoryDb(alerting);
                 return; 
             }
 
-            // 4. TARGETED DELETION
-            const deleteKeywords = ['delete', 'remove', 'dismiss', 'cancel', 'clear'];
-            const isDeletionCommand = deleteKeywords.some(kw => low.includes(kw));
-            
-            if (isDeletionCommand) {
-                const sortedReminders = [...reminderList].sort((a, b) => b.task.length - a.task.length);
-                for (const r of sortedReminders) {
+            const deleteKeywords = ['delete', 'remove', 'cancel'];
+            if (deleteKeywords.some(kw => low.includes(kw))) {
+                for (const r of reminderList) {
                     if (low.includes(r.task.toLowerCase())) {
-                        internalDeleteReminder(r.id);
-                        render();
+                        moveToHistoryDb(r);
                         return;
                     }
                 }
             }
 
-            // 5. SNOOZE ALERT
             if (alerting && low.includes('snooze')) {
                 const parts = low.split('snooze');
                 const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
                 const newTime = parseTimePhrase(snoozeStr);
                 if (newTime) {
-                    alerting.targetTime = newTime.getTime();
-                    alerting.isAlerting = false;
-                    alerting.hasAlerted = false;
-                    render();
+                    updateReminderInDb(alerting.id, {
+                        targetTime: newTime.getTime(),
+                        isAlerting: false,
+                        hasAlerted: false
+                    });
                 }
                 return;
             }
 
-            // 6. FALLBACK SIMPLE DELETE
-            if (low === 'delete' || low === 'remove') {
-                if (reminderList.length > 0) {
-                    const last = reminderList.pop();
-                    moveToHistory(last);
-                    render();
-                }
-                return;
-            }
-
-            // 7. CREATE NEW REMINDER
             const timeRegex = /((\d+\s*\w*\s*(seconds?|s|minutes?|m|hours?|hr?|h|days?|d)(\s+from\s+now)?)|(tomorrow|today|on\s+\w+)\s*.*|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|\s*from\s+now|now)$/i;
             const match = val.match(timeRegex);
             if (match) {
                 const task = val.substring(0, match.index).replace(/(remind me to|remind me|me to|to|for|at|on|in|from|a)\s*$/i, '').trim();
                 const target = parseTimePhrase(match[0]);
                 if (target && task) {
-                    reminderList.push({
-                        id: generateId(),
-                        task: task,
-                        targetTime: target.getTime(),
-                        creationTime: Date.now(),
-                        isAlerting: false,
-                        hasAlerted: false
-                    });
-                    render();
+                    addReminderToDb(task, target.getTime());
                 }
             }
-        }
-
-        function moveToHistory(reminder) {
-            reminderHistory.unshift({
-                ...reminder,
-                completedAt: Date.now()
-            });
-            if (reminderHistory.length > 50) reminderHistory.pop();
-        }
-
-        function internalDeleteReminder(id) {
-            const reminder = reminderList.find(r => r.id === id);
-            if (reminder) moveToHistory(reminder);
-            reminderList = reminderList.filter(r => r.id !== id);
         }
 
         function render() {
             const container = document.getElementById('reminderListContainer');
             const historyContainer = document.getElementById('historyListContainer');
-            const pendingCount = reminderList.length;
-            document.getElementById('reminderCount').textContent = pendingCount;
+            document.getElementById('reminderCount').textContent = reminderList.length;
 
             container.innerHTML = reminderList.map(r => {
                 const alertClass = r.isAlerting ? 'reminder-alerting' : '';
-                const timeStr = r.isAlerting ? 'Speak now: Snooze or Dismiss' : formatTime(r);
+                const timeStr = r.isAlerting ? 'Speak now: Snooze or Dismiss' : formatTime(r.targetTime);
                 return `
                     <div class="reminder-item ${alertClass}">
                         <div>
@@ -467,18 +511,11 @@
                     </div>
                 `;
             }).join('');
-
-            if (reminderHistory.length === 0) {
-                historyContainer.innerHTML = `<p class="text-center text-gray-400 text-xs py-2 italic">History is empty.</p>`;
-            }
         }
 
         let recognition = null;
         if ('webkitSpeechRecognition' in window) {
             recognition = new webkitSpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-
             recognition.onstart = () => {
                 isListening = true;
                 document.getElementById('micButton').classList.add('listening');
@@ -489,18 +526,12 @@
                 document.getElementById('micButton').classList.remove('listening');
                 document.getElementById('micStatus').textContent = '\u00a0';
             };
-            recognition.onresult = (e) => {
-                const transcript = e.results[0][0].transcript;
-                document.getElementById('commandInput').value = transcript;
-                handleInput(transcript);
-            };
+            recognition.onresult = (e) => handleInput(e.results[0][0].transcript);
         }
 
         function triggerVoice() {
             if (recognition && !isListening) {
-                try {
-                    recognition.start();
-                } catch(e) {}
+                try { recognition.start(); } catch(e) {}
             }
         }
 
@@ -511,17 +542,17 @@
 
             reminderList.forEach(r => {
                 if (r.targetTime <= now) {
-                    if (!r.isAlerting) justStartedAlerting = true;
-                    r.isAlerting = true;
+                    if (!r.isAlerting) {
+                        justStartedAlerting = true;
+                        updateReminderInDb(r.id, { isAlerting: true });
+                    }
                     alertingNow = true;
                 }
             });
 
             if (alertingNow) {
                 playAlertSound();
-                if (justStartedAlerting || !isListening) {
-                    triggerVoice();
-                }
+                if (justStartedAlerting || !isListening) triggerVoice();
             }
             render();
         }, 1000);
@@ -529,18 +560,12 @@
         document.getElementById('sendButton').onclick = () => handleInput(document.getElementById('commandInput').value);
         document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
         document.getElementById('micButton').onclick = () => triggerVoice();
-        document.getElementById('clearHistoryBtn').onclick = () => {
-            reminderHistory = [];
-            render();
-        };
-
-        document.getElementById('shareBtn').onclick = () => {
-            copyToClipboard(window.location.href);
-        };
+        document.getElementById('clearHistoryBtn').onclick = () => clearHistoryDb();
+        document.getElementById('shareBtn').onclick = () => copyToClipboard(window.location.href);
 
         window.deleteReminder = (id) => { 
-            internalDeleteReminder(id); 
-            render(); 
+            const reminder = reminderList.find(r => r.id === id);
+            if (reminder) moveToHistoryDb(reminder); 
         };
     </script>
 </body>
