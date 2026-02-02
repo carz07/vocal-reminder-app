@@ -162,7 +162,7 @@
         }
         @keyframes pulse-ring-red {
             0%, 100% { box-shadow: 0 0 0 0 rgba(229, 62, 62, 0.4); }
-            50% { box-rule: 0 0 0 8px rgba(229, 62, 62, 0); }
+            50% { box-shadow: 0 0 0 8px rgba(229, 62, 62, 0); }
         }
         @keyframes pulse-ring-purple {
             0% { box-shadow: 0 0 0 0 rgba(90, 103, 216, 0.4); }
@@ -218,10 +218,12 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, query, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // FALLBACK: If environment variables are missing (GitHub), use defaults or local storage
+        // Logic for handling missing Firebase config (Local Fallback)
         let config = {};
+        let useCloud = false;
         try {
             config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+            if (config.apiKey) useCloud = true;
         } catch(e) { console.error("Config parse error", e); }
         
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'vocal-reminder-app-v1';
@@ -232,8 +234,11 @@
         let reminderHistory = [];
         let isListening = false;
 
-        // Initialize only if config exists
-        if (config.apiKey) {
+        // LOCAL STORAGE FALLBACK HELPERS
+        const getLocal = (key) => JSON.parse(localStorage.getItem(`${appId}_${key}`) || '[]');
+        const setLocal = (key, data) => localStorage.setItem(`${appId}_${key}`, JSON.stringify(data));
+
+        if (useCloud) {
             const app = initializeApp(config);
             auth = getAuth(app);
             db = getFirestore(app);
@@ -246,7 +251,7 @@
                         await signInAnonymously(auth);
                     }
                 } catch (err) {
-                    document.getElementById('authStatus').textContent = "Storage Error: Connection Failed.";
+                    switchToLocal("Connection Failed");
                     console.error("Auth error:", err);
                 }
             };
@@ -255,61 +260,98 @@
             onAuthStateChanged(auth, (user) => {
                 currentUser = user;
                 if (user) {
-                    document.getElementById('authStatus').textContent = `Connected (UID: ${user.uid.substring(0,8)}...)`;
-                    setupListeners(user.uid);
+                    document.getElementById('authStatus').textContent = `Cloud Storage: Active (UID: ${user.uid.substring(0,8)}...)`;
+                    setupCloudListeners(user.uid);
                 }
             });
         } else {
-            document.getElementById('authStatus').textContent = "Error: Missing Firebase Configuration";
-            document.getElementById('authStatus').style.color = "#ef4444";
+            switchToLocal("Missing Firebase Config");
         }
 
-        function setupListeners(userId) {
+        function switchToLocal(reason) {
+            useCloud = false;
+            document.getElementById('authStatus').textContent = `Offline Storage: Active (${reason})`;
+            document.getElementById('authStatus').style.color = "#4a5568";
+            reminderList = getLocal('reminders');
+            reminderHistory = getLocal('history');
+            render();
+        }
+
+        function setupCloudListeners(userId) {
             const remindersRef = collection(db, 'artifacts', appId, 'users', userId, 'reminders');
             onSnapshot(remindersRef, (snapshot) => {
                 reminderList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 render();
-            }, (err) => console.error("Snapshot error:", err));
+            }, (err) => switchToLocal("Snapshot Error"));
 
             const historyRef = collection(db, 'artifacts', appId, 'users', userId, 'history');
             onSnapshot(historyRef, (snapshot) => {
                 reminderHistory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
                     .sort((a, b) => b.completedAt - a.completedAt);
                 render();
-            }, (err) => console.error("History error:", err));
+            }, (err) => switchToLocal("History Error"));
         }
 
-        async function addReminderToDb(task, targetTime) {
-            if (!currentUser) return;
-            try {
-                const remindersRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders');
-                await addDoc(remindersRef, {
-                    task,
-                    targetTime,
-                    creationTime: Date.now(),
-                    isAlerting: false
-                });
-            } catch (err) { console.error("Add error:", err); }
+        async function addReminder(task, targetTime) {
+            const newReminder = {
+                task,
+                targetTime,
+                creationTime: Date.now(),
+                isAlerting: false
+            };
+
+            if (useCloud && currentUser) {
+                try {
+                    const remindersRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders');
+                    await addDoc(remindersRef, newReminder);
+                } catch (err) { console.error("Cloud Add error:", err); }
+            } else {
+                newReminder.id = Date.now().toString();
+                reminderList.push(newReminder);
+                setLocal('reminders', reminderList);
+                render();
+            }
         }
 
-        async function moveToHistoryDb(reminder) {
-            if (!currentUser) return;
-            try {
-                const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
-                await addDoc(historyRef, { task: reminder.task, completedAt: Date.now() });
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id));
-            } catch (err) { console.error("History move error:", err); }
+        async function moveToHistory(reminder) {
+            const historyEntry = { task: reminder.task, completedAt: Date.now() };
+            if (useCloud && currentUser) {
+                try {
+                    const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
+                    await addDoc(historyRef, historyEntry);
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id));
+                } catch (err) { console.error("Cloud History move error:", err); }
+            } else {
+                reminderHistory.unshift(historyEntry);
+                reminderList = reminderList.filter(r => r.id !== reminder.id);
+                setLocal('history', reminderHistory);
+                setLocal('reminders', reminderList);
+                render();
+            }
         }
 
-        async function updateReminderInDb(id, updates) {
-            if (!currentUser) return;
-            await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', id), updates);
+        async function updateReminderAlert(id, updates) {
+            if (useCloud && currentUser) {
+                await updateDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', id), updates);
+            } else {
+                const idx = reminderList.findIndex(r => r.id === id);
+                if (idx !== -1) {
+                    reminderList[idx] = { ...reminderList[idx], ...updates };
+                    setLocal('reminders', reminderList);
+                    render();
+                }
+            }
         }
 
-        async function clearHistoryDb() {
-            if (!currentUser) return;
-            for (const h of reminderHistory) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id));
+        async function clearHistory() {
+            if (useCloud && currentUser) {
+                for (const h of reminderHistory) {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id));
+                }
+            } else {
+                reminderHistory = [];
+                setLocal('history', []);
+                render();
             }
         }
 
@@ -325,7 +367,7 @@
 
             const relMatch = phrase.match(/(\d+|a|an|one)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)/i);
             if (relMatch) {
-                let val = parseInt(relMatch[1]) || 1;
+                let val = (relMatch[1] === 'a' || relMatch[1] === 'an' || relMatch[1] === 'one') ? 1 : parseInt(relMatch[1]);
                 const unit = relMatch[2][0];
                 if (unit === 's') target.setSeconds(target.getSeconds() + val);
                 else if (unit === 'm') target.setMinutes(target.getMinutes() + val);
@@ -334,7 +376,11 @@
                 return target;
             }
 
-            if (phrase.includes('tomorrow')) { target.setDate(target.getDate() + 1); target.setHours(9,0,0,0); return target; }
+            if (phrase.includes('tomorrow')) { 
+                target.setDate(target.getDate() + 1); 
+                target.setHours(9,0,0,0); 
+                return target; 
+            }
             
             return new Date(Date.now() + 60000); // Default 1 min
         }
@@ -347,12 +393,12 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
             if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('done'))) {
-                moveToHistoryDb(alerting);
+                moveToHistory(alerting);
                 return; 
             }
 
             const target = parseTimePhrase(val);
-            addReminderToDb(val, target.getTime());
+            addReminder(val, target.getTime());
         }
 
         function render() {
@@ -373,10 +419,10 @@
             `).join('');
 
             document.querySelectorAll('.delete-btn-action').forEach(btn => {
-                btn.addEventListener('click', () => {
+                btn.onclick = () => {
                     const r = reminderList.find(x => x.id === btn.dataset.id);
-                    if (r) moveToHistoryDb(r);
-                });
+                    if (r) moveToHistory(r);
+                };
             });
 
             historyContainer.innerHTML = reminderHistory.map(h => `
@@ -401,12 +447,12 @@
 
         document.getElementById('sendButton').addEventListener('click', () => handleInput(document.getElementById('commandInput').value));
         document.getElementById('commandInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleInput(e.target.value); });
-        document.getElementById('clearHistoryBtn').addEventListener('click', clearHistoryDb);
+        document.getElementById('clearHistoryBtn').addEventListener('click', clearHistory);
         
         setInterval(() => {
             const now = Date.now();
             reminderList.forEach(r => {
-                if (r.targetTime <= now && !r.isAlerting) updateReminderInDb(r.id, { isAlerting: true });
+                if (r.targetTime <= now && !r.isAlerting) updateReminderAlert(r.id, { isAlerting: true });
             });
         }, 5000);
     </script>
