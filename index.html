@@ -251,36 +251,61 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
 
-            if (low === 'delete all' || low === 'clear all') {
+            // 1. CLEAR ALL
+            if (low === 'delete all' || low === 'clear all' || low === 'remove all') {
                 reminderList = [];
+                render();
                 return;
             }
 
-            if (alerting) {
-                if (low === 'dismiss' || low === 'stop' || low === 'cancel' || low === 'delete') { 
-                    internalDeleteReminder(alerting.id); 
-                    return; 
-                }
-                if (low.includes('snooze')) {
-                    const parts = low.split('snooze');
-                    const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
-                    const newTime = parseTimePhrase(snoozeStr);
-                    if (newTime) {
-                        alerting.targetTime = newTime.getTime();
-                        alerting.isAlerting = false;
-                        alerting.hasAlerted = false;
+            // 2. DISMISS / STOP ALERTING REMINDER
+            if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('cancel') || low.includes('done') || low.includes('delete'))) {
+                internalDeleteReminder(alerting.id); 
+                render();
+                return; 
+            }
+
+            // 3. TARGETED DELETION (Check if user mentioned any current task name)
+            const deleteKeywords = ['delete', 'remove', 'dismiss', 'cancel', 'clear'];
+            const isDeletionCommand = deleteKeywords.some(kw => low.includes(kw));
+            
+            if (isDeletionCommand) {
+                // Try to find the reminder that matches the spoken words
+                // We sort by length descending to catch longer phrases first (e.g., "drink water" vs "water")
+                const sortedReminders = [...reminderList].sort((a, b) => b.task.length - a.task.length);
+                for (const r of sortedReminders) {
+                    if (low.includes(r.task.toLowerCase())) {
+                        internalDeleteReminder(r.id);
+                        render();
+                        return;
                     }
-                    return;
                 }
             }
 
-            if (low === 'delete') {
+            // 4. SNOOZE ALERT
+            if (alerting && low.includes('snooze')) {
+                const parts = low.split('snooze');
+                const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
+                const newTime = parseTimePhrase(snoozeStr);
+                if (newTime) {
+                    alerting.targetTime = newTime.getTime();
+                    alerting.isAlerting = false;
+                    alerting.hasAlerted = false;
+                    render();
+                }
+                return;
+            }
+
+            // 5. FALLBACK SIMPLE DELETE (If just "delete" or "remove" said with no match)
+            if (low === 'delete' || low === 'remove') {
                 if (reminderList.length > 0) {
                     reminderList.pop();
+                    render();
                 }
                 return;
             }
 
+            // 6. CREATE NEW REMINDER
             const timeRegex = /((\d+\s*\w*\s*(seconds?|s|minutes?|m|hours?|hr?|h|days?|d)(\s+from\s+now)?)|(tomorrow|today|on\s+\w+)\s*.*|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|\s*from\s+now|now)$/i;
             const match = val.match(timeRegex);
             if (match) {
@@ -295,6 +320,7 @@
                         isAlerting: false,
                         hasAlerted: false
                     });
+                    render();
                 }
             }
         }
@@ -371,7 +397,6 @@
 
             if (alertingNow) {
                 playAlertSound();
-                // Automatically activate mic if alert just started or if nothing is being said
                 if (justStartedAlerting || !isListening) {
                     triggerVoice();
                 }
