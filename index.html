@@ -194,7 +194,7 @@
         </div>
 
         <div class="input-group">
-            <input type="text" id="commandInput" class="input-field" placeholder="e.g., remind me to drink water 5 minutes from now">
+            <input type="text" id="commandInput" class="input-field" placeholder="e.g., call Berts next week">
             <button id="sendButton" class="set-button" title="Set Reminder">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -220,7 +220,6 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, query, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase Configuration
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
@@ -232,7 +231,6 @@
         let isListening = false;
         let currentUser = null;
 
-        // AUTHENTICATION (RULE 3)
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -242,7 +240,6 @@
                 }
             } catch (err) {
                 console.error("Auth error:", err);
-                document.getElementById('authStatus').textContent = "Connection error. Retrying...";
             }
         };
         initAuth();
@@ -255,20 +252,17 @@
             }
         });
 
-        // FIRESTORE LISTENERS (RULE 1 & 2)
         function setupListeners(userId) {
-            // Pending Reminders
             const remindersRef = collection(db, 'artifacts', appId, 'users', userId, 'reminders');
             onSnapshot(remindersRef, (snapshot) => {
                 reminderList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 render();
             }, (err) => console.error("Snapshot error:", err));
 
-            // History
             const historyRef = collection(db, 'artifacts', appId, 'users', userId, 'history');
             onSnapshot(historyRef, (snapshot) => {
                 reminderHistory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                    .sort((a, b) => b.completedAt - a.completedAt); // Sort in memory (Rule 2)
+                    .sort((a, b) => b.completedAt - a.completedAt);
                 render();
             }, (err) => console.error("History error:", err));
         }
@@ -290,13 +284,11 @@
         async function moveToHistoryDb(reminder) {
             if (!currentUser) return;
             try {
-                // Add to history
                 const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history');
                 await addDoc(historyRef, {
                     task: reminder.task,
                     completedAt: Date.now()
                 });
-                // Delete from pending
                 const reminderDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'reminders', reminder.id);
                 await deleteDoc(reminderDoc);
             } catch (err) { console.error("History move error:", err); }
@@ -312,83 +304,74 @@
 
         async function clearHistoryDb() {
             if (!currentUser) return;
-            // Note: Batch delete or simple loops for small datasets (Rule 2)
             reminderHistory.forEach(async (h) => {
                 const historyDoc = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', h.id);
                 await deleteDoc(historyDoc);
             });
         }
 
-        // --- UI & LOGIC ---
-
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 2000);
-        }
-
-        function copyToClipboard(text) {
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-            document.body.appendChild(textArea);
-            textArea.select();
-            document.execCommand('copy');
-            showToast("Link copied to clipboard!");
-            document.body.removeChild(textArea);
-        }
-
-        function playAlertSound() {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const oscillator = audioCtx.createOscillator();
-                const gainNode = audioCtx.createGain();
-                oscillator.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-                oscillator.type = 'square';
-                oscillator.frequency.setValueAtTime(440, audioCtx.currentTime); 
-                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-                oscillator.start();
-                oscillator.stop(audioCtx.currentTime + 0.3);
-            } catch (e) {}
-        }
-
         function parseTimePhrase(phrase, baseDate = new Date()) {
             phrase = phrase.trim().toLowerCase();
             if (!phrase) return null;
 
+            const target = new Date(baseDate);
+            target.setSeconds(0, 0);
+
+            // Updated rule: "next week" is exactly 7 days from now
+            if (phrase.includes('next week')) {
+                const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+                const dayMatch = days.find(d => phrase.includes(d));
+                
+                if (dayMatch) {
+                    const currentDay = target.getDay();
+                    const targetDayIndex = days.indexOf(dayMatch);
+                    let diff = targetDayIndex - currentDay;
+                    if (diff <= 0) diff += 7;
+                    // For "next week Tuesday", we go to the next week's day
+                    target.setDate(target.getDate() + diff + 7);
+                    target.setHours(9, 0, 0, 0);
+                    return target;
+                } else {
+                    // "next week" alone = exactly 7 days (168 hours) from now
+                    target.setDate(target.getDate() + 7);
+                    // Keep current time or default to 9am if strictly requested
+                    return target;
+                }
+            }
+
+            // Clean phrase for relative units
             let relaxed = phrase
-                .replace(/^(for|in|from|at)\s+/, '')
+                .replace(/^(for|in|from|at|on|next)\s+/, '')
                 .replace(/\s+more\s+/, ' ')
                 .replace(/\s+from\s+now\s*$/, '')
                 .trim();
                 
-            const relMatch = relaxed.match(/^(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)$/i);
+            const relMatch = relaxed.match(/^(\d+|a|an|one)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?|w|weeks?)$/i);
             if (relMatch) {
-                const val = parseInt(relMatch[1], 10);
+                let valStr = relMatch[1].toLowerCase();
+                let val = (valStr === 'a' || valStr === 'an' || valStr === 'one') ? 1 : parseInt(valStr, 10);
                 const unitStr = relMatch[2].toLowerCase();
-                const d = new Date(baseDate.getTime());
                 
-                if (unitStr.startsWith('s')) d.setSeconds(d.getSeconds() + val);
-                else if (unitStr.startsWith('m')) d.setMinutes(d.getMinutes() + val);
-                else if (unitStr.startsWith('h')) d.setHours(d.getHours() + val);
-                else if (unitStr.startsWith('d')) d.setDate(d.getDate() + val);
-                return d;
+                if (unitStr.startsWith('s')) target.setSeconds(target.getSeconds() + val);
+                else if (unitStr.startsWith('m')) target.setMinutes(target.getMinutes() + val);
+                else if (unitStr.startsWith('h')) target.setHours(target.getHours() + val);
+                else if (unitStr.startsWith('d')) target.setDate(target.getDate() + val);
+                else if (unitStr.startsWith('w')) target.setDate(target.getDate() + (val * 7));
+                return target;
             }
 
-            const target = new Date(baseDate);
-            target.setSeconds(0, 0);
-            let explicit = false;
-
-            if (phrase.includes('tomorrow')) { target.setDate(target.getDate() + 1); explicit = true; }
+            if (phrase.includes('tomorrow')) { 
+                target.setDate(target.getDate() + 1); 
+                target.setHours(9, 0, 0, 0);
+            }
+            
             const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             const dayMatch = days.find(d => phrase.includes(d));
-            if (dayMatch) {
+            if (dayMatch && !phrase.includes('next week')) {
                 let diff = days.indexOf(dayMatch) - target.getDay();
                 if (diff <= 0) diff += 7;
                 target.setDate(target.getDate() + diff);
-                explicit = true;
+                target.setHours(9, 0, 0, 0);
             }
 
             const timeRegex = /\s*at\s*(\d{1,2})(:(\d{2}))?\s*(am|pm)?/i;
@@ -400,23 +383,28 @@
                 if (ampm === 'pm' && hrs < 12) hrs += 12;
                 else if (ampm === 'am' && hrs === 12) hrs = 0;
                 target.setHours(hrs, mins, 0, 0);
-                if (target.getTime() <= Date.now() && !explicit) target.setDate(target.getDate() + 1);
-                return target;
+                if (target.getTime() <= Date.now() && !phrase.includes('tomorrow') && !dayMatch) target.setDate(target.getDate() + 1);
             }
 
-            if (phrase.includes('now')) return new Date(Date.now() + 2000);
-            return null;
+            if (phrase.includes('now') && !relMatch) return new Date(Date.now() + 5000);
+            return target.getTime() !== baseDate.getTime() ? target : null;
         }
 
         function formatTime(targetTime) {
-            const diff = targetTime - Date.now();
+            const now = Date.now();
+            const diff = targetTime - now;
             if (diff < 0) return 'Overdue';
+            
             const s = Math.floor(diff / 1000);
             if (s < 60) return `in ${s}s`;
             const m = Math.floor(s / 60);
-            if (m < 60) return `in ${m}m ${s % 60}s`;
+            if (m < 60) return `in ${m}m`;
             const h = Math.floor(m / 60);
-            return `in ${h}h ${m % 60}m`;
+            if (h < 24) return `in ${h}h ${m % 60}m`;
+            
+            const d = Math.floor(h / 24);
+            const dateObj = new Date(targetTime);
+            return `on ${dateObj.toLocaleDateString([], {month:'short', day:'numeric'})} (${d}d)`;
         }
 
         function handleInput(raw) {
@@ -427,53 +415,29 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
 
-            if (low === 'clear history' || low === 'delete history') {
-                clearHistoryDb();
-                return;
-            }
-
-            if (low === 'delete all' || low === 'clear all') {
-                reminderList.forEach(r => moveToHistoryDb(r));
-                return;
-            }
-
             if (alerting && (low.includes('dismiss') || low.includes('stop') || low.includes('done'))) {
                 moveToHistoryDb(alerting);
                 return; 
             }
 
-            const deleteKeywords = ['delete', 'remove', 'cancel'];
-            if (deleteKeywords.some(kw => low.includes(kw))) {
-                for (const r of reminderList) {
-                    if (low.includes(r.task.toLowerCase())) {
-                        moveToHistoryDb(r);
-                        return;
-                    }
-                }
-            }
-
-            if (alerting && low.includes('snooze')) {
-                const parts = low.split('snooze');
-                const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
-                const newTime = parseTimePhrase(snoozeStr);
-                if (newTime) {
-                    updateReminderInDb(alerting.id, {
-                        targetTime: newTime.getTime(),
-                        isAlerting: false,
-                        hasAlerted: false
-                    });
-                }
-                return;
-            }
-
-            const timeRegex = /((\d+\s*\w*\s*(seconds?|s|minutes?|m|hours?|hr?|h|days?|d)(\s+from\s+now)?)|(tomorrow|today|on\s+\w+)\s*.*|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|\s*from\s+now|now)$/i;
-            const match = val.match(timeRegex);
+            // Match keywords for time splitting
+            const timeKeywords = /(next week|tomorrow|today|at \d|in \d|from now|a day|an hour|one minute|on \w+day)/i;
+            const match = val.match(timeKeywords);
+            
             if (match) {
-                const task = val.substring(0, match.index).replace(/(remind me to|remind me|me to|to|for|at|on|in|from|a)\s*$/i, '').trim();
-                const target = parseTimePhrase(match[0]);
-                if (target && task) {
-                    addReminderToDb(task, target.getTime());
+                const taskStr = val.substring(0, match.index)
+                                  .replace(/(remind me to|remind me|me to|to|set reminder for)\s*$/i, '')
+                                  .trim();
+                const timeStr = val.substring(match.index);
+                const target = parseTimePhrase(timeStr);
+                if (target && taskStr) {
+                    addReminderToDb(taskStr, target.getTime());
+                } else if (target) {
+                    addReminderToDb(val, target.getTime());
                 }
+            } else {
+                const target = parseTimePhrase(val);
+                if (target) addReminderToDb(val, target.getTime());
             }
         }
 
@@ -484,14 +448,14 @@
 
             container.innerHTML = reminderList.map(r => {
                 const alertClass = r.isAlerting ? 'reminder-alerting' : '';
-                const timeStr = r.isAlerting ? 'Speak now: Snooze or Dismiss' : formatTime(r.targetTime);
+                const timeStr = r.isAlerting ? 'Alerting!' : formatTime(r.targetTime);
                 return `
                     <div class="reminder-item ${alertClass}">
-                        <div>
-                            <p class="font-semibold text-gray-800">${r.task}</p>
-                            <p class="text-sm ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">${timeStr}</p>
+                        <div class="flex-grow min-w-0 pr-4">
+                            <p class="font-semibold text-gray-800 truncate">${r.task}</p>
+                            <p class="text-xs ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">${timeStr}</p>
                         </div>
-                        <button class="delete-button" onclick="window.deleteReminder('${r.id}')">Delete</button>
+                        <button class="delete-button shrink-0" onclick="window.deleteReminder('${r.id}')">Delete</button>
                     </div>
                 `;
             }).join('');
@@ -502,14 +466,7 @@
 
             historyContainer.innerHTML = reminderHistory.map(h => {
                 const date = new Date(h.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                return `
-                    <div class="history-item">
-                        <div>
-                            <p class="text-sm font-medium text-gray-600">${h.task}</p>
-                            <p class="text-[10px] text-gray-400">${date}</p>
-                        </div>
-                    </div>
-                `;
+                return `<div class="history-item"><p class="text-sm font-medium text-gray-600 truncate">${h.task}</p><span class="text-[10px] text-gray-400 ml-2 whitespace-nowrap">${date}</span></div>`;
             }).join('');
         }
 
@@ -537,23 +494,18 @@
 
         setInterval(() => {
             const now = Date.now();
-            let alertingNow = false;
-            let justStartedAlerting = false;
-
             reminderList.forEach(r => {
-                if (r.targetTime <= now) {
-                    if (!r.isAlerting) {
-                        justStartedAlerting = true;
-                        updateReminderInDb(r.id, { isAlerting: true });
-                    }
-                    alertingNow = true;
+                if (r.targetTime <= now && !r.isAlerting) {
+                    updateReminderInDb(r.id, { isAlerting: true });
+                    try {
+                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        const osc = audioCtx.createOscillator();
+                        osc.connect(audioCtx.destination);
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + 0.2);
+                    } catch(e) {}
                 }
             });
-
-            if (alertingNow) {
-                playAlertSound();
-                if (justStartedAlerting || !isListening) triggerVoice();
-            }
             render();
         }, 1000);
 
@@ -561,7 +513,10 @@
         document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
         document.getElementById('micButton').onclick = () => triggerVoice();
         document.getElementById('clearHistoryBtn').onclick = () => clearHistoryDb();
-        document.getElementById('shareBtn').onclick = () => copyToClipboard(window.location.href);
+        document.getElementById('shareBtn').onclick = () => {
+            const t = document.createElement("textarea"); t.value = window.location.href; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
+            const toast = document.getElementById('toast'); toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2000);
+        };
 
         window.deleteReminder = (id) => { 
             const reminder = reminderList.find(r => r.id === id);
