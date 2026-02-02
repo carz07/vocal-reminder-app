@@ -355,20 +355,45 @@
             }
         }
 
+        /**
+         * Enhanced Time Parsing Logic
+         */
         function parseTimePhrase(phrase, baseDate = new Date()) {
             phrase = phrase.trim().toLowerCase();
             const target = new Date(baseDate);
             target.setSeconds(0, 0);
 
-            if (phrase.includes('next week')) {
-                target.setDate(target.getDate() + 7);
+            // 1. Day of week detection (monday, tuesday, etc.)
+            const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+            let dayIndex = -1;
+            days.forEach((d, i) => { if(phrase.includes(d)) dayIndex = i; });
+
+            if (dayIndex !== -1) {
+                const isNextWeek = phrase.includes('next week');
+                let daysToAdd = (dayIndex + 7 - target.getDay()) % 7;
+                
+                // If today is Friday and user says "Friday", it means next week unless specified
+                if (daysToAdd === 0 && (isNextWeek || phrase.includes('next'))) daysToAdd = 7;
+                else if (isNextWeek) daysToAdd += 7;
+                else if (daysToAdd === 0) daysToAdd = 7; // Default "Friday" to next Friday if today is Friday
+
+                target.setDate(target.getDate() + daysToAdd);
+                target.setHours(9, 0, 0, 0); // Default to 9 AM
                 return target;
             }
 
+            // 2. "Next week" (General)
+            if (phrase.includes('next week')) {
+                target.setDate(target.getDate() + 7);
+                target.setHours(9, 0, 0, 0);
+                return target;
+            }
+
+            // 3. Relative "in X minutes/hours"
             const relMatch = phrase.match(/(\d+|a|an|one)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)/i);
             if (relMatch) {
-                let val = (relMatch[1] === 'a' || relMatch[1] === 'an' || relMatch[1] === 'one') ? 1 : parseInt(relMatch[1]);
-                const unit = relMatch[2][0];
+                let val = (['a','an','one'].includes(relMatch[1])) ? 1 : parseInt(relMatch[1]);
+                const unit = relMatch[2][0].toLowerCase();
                 if (unit === 's') target.setSeconds(target.getSeconds() + val);
                 else if (unit === 'm') target.setMinutes(target.getMinutes() + val);
                 else if (unit === 'h') target.setHours(target.getHours() + val);
@@ -376,13 +401,15 @@
                 return target;
             }
 
+            // 4. "Tomorrow"
             if (phrase.includes('tomorrow')) { 
                 target.setDate(target.getDate() + 1); 
-                target.setHours(9,0,0,0); 
+                target.setHours(9, 0, 0, 0); 
                 return target; 
             }
             
-            return new Date(Date.now() + 60000); // Default 1 min
+            // 5. Default fallback (1 minute from now)
+            return new Date(Date.now() + 60000);
         }
 
         function handleInput(raw) {
@@ -406,17 +433,25 @@
             const historyContainer = document.getElementById('historyListContainer');
             document.getElementById('reminderCount').textContent = reminderList.length;
 
-            container.innerHTML = reminderList.map(r => `
+            // Sort pending reminders by time
+            const sortedList = [...reminderList].sort((a, b) => a.targetTime - b.targetTime);
+
+            container.innerHTML = sortedList.map(r => {
+                const dateObj = new Date(r.targetTime);
+                const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const dateStr = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                
+                return `
                 <div class="reminder-item ${r.isAlerting ? 'reminder-alerting' : ''}">
                     <div class="flex-grow min-w-0 pr-4">
                         <p class="font-semibold text-gray-800 truncate">${r.task}</p>
                         <p class="text-xs ${r.isAlerting ? 'text-red-600 font-bold' : 'text-indigo-600'}">
-                            ${r.isAlerting ? 'Alerting!' : new Date(r.targetTime).toLocaleTimeString()}
+                            ${r.isAlerting ? 'Alerting!' : dateStr + ' @ ' + timeStr}
                         </p>
                     </div>
                     <button class="delete-btn-action delete-button" data-id="${r.id}">Done</button>
                 </div>
-            `).join('');
+            `}).join('');
 
             document.querySelectorAll('.delete-btn-action').forEach(btn => {
                 btn.onclick = () => {
@@ -455,6 +490,21 @@
                 if (r.targetTime <= now && !r.isAlerting) updateReminderAlert(r.id, { isAlerting: true });
             });
         }, 5000);
+
+        // Share functionality
+        document.getElementById('shareBtn').onclick = () => {
+            const url = window.location.href;
+            const tempInput = document.createElement('input');
+            document.body.appendChild(tempInput);
+            tempInput.value = url;
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            
+            const toast = document.getElementById('toast');
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        };
     </script>
 </body>
 </html>
