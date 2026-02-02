@@ -28,7 +28,7 @@
         .mic-button {
             width: 80px;
             height: 80px;
-            background-color: #5a67d8; /* Indigo/Purple */
+            background-color: #5a67d8;
             color: white;
             border-radius: 50%;
             display: flex;
@@ -152,6 +152,7 @@
     <script>
         let reminderList = [];
         let reminderIdCounter = Date.now();
+        let isListening = false;
 
         function generateId() { return `r-${reminderIdCounter++}`; }
 
@@ -175,21 +176,30 @@
             phrase = phrase.trim().toLowerCase();
             if (!phrase) return null;
 
-            // Relative
-            let relaxed = phrase.replace(/^(for|in|from)\s+/, '').replace(/\s+from\s+now\s*$/, '').trim();
+            let relaxed = phrase
+                .replace(/^(for|in|from|at)\s+/, '')
+                .replace(/\s+more\s+/, ' ')
+                .replace(/\s+from\s+now\s*$/, '')
+                .trim();
+                
             const relMatch = relaxed.match(/^(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|day|days?)$/i);
             if (relMatch) {
                 const val = parseInt(relMatch[1], 10);
-                const unit = relMatch[2][0];
+                const unitStr = relMatch[2].toLowerCase();
                 const d = new Date(baseDate.getTime());
-                if (unit === 's') d.setSeconds(d.getSeconds() + val);
-                else if (unit === 'm') d.setMinutes(d.getMinutes() + val);
-                else if (unit === 'h') d.setHours(d.getHours() + val);
-                else if (unit === 'd') d.setDate(d.getDate() + val);
+                
+                if (unitStr.startsWith('s')) {
+                    d.setSeconds(d.getSeconds() + val);
+                } else if (unitStr.startsWith('m')) {
+                    d.setMinutes(d.getMinutes() + val);
+                } else if (unitStr.startsWith('h')) {
+                    d.setHours(d.getHours() + val);
+                } else if (unitStr.startsWith('d')) {
+                    d.setDate(d.getDate() + val);
+                }
                 return d;
             }
 
-            // Absolute/Calendar
             const target = new Date(baseDate);
             target.setSeconds(0, 0);
             let explicit = false;
@@ -241,11 +251,19 @@
             const low = val.toLowerCase();
             const alerting = reminderList.find(r => r.isAlerting);
 
+            if (low === 'delete all' || low === 'clear all') {
+                reminderList = [];
+                return;
+            }
+
             if (alerting) {
-                if (low === 'dismiss') { internalDeleteReminder(alerting.id); return; }
-                if (low === 'delete') { internalDeleteReminder(alerting.id); return; }
-                if (low.startsWith('snooze')) {
-                    const snoozeStr = low.replace('snooze', '').trim() || '5 minutes';
+                if (low === 'dismiss' || low === 'stop' || low === 'cancel' || low === 'delete') { 
+                    internalDeleteReminder(alerting.id); 
+                    return; 
+                }
+                if (low.includes('snooze')) {
+                    const parts = low.split('snooze');
+                    const snoozeStr = parts.length > 1 ? parts[1].trim() : '5 minutes';
                     const newTime = parseTimePhrase(snoozeStr);
                     if (newTime) {
                         alerting.targetTime = newTime.getTime();
@@ -256,7 +274,13 @@
                 }
             }
 
-            // New Task
+            if (low === 'delete') {
+                if (reminderList.length > 0) {
+                    reminderList.pop();
+                }
+                return;
+            }
+
             const timeRegex = /((\d+\s*\w*\s*(seconds?|s|minutes?|m|hours?|hr?|h|days?|d)(\s+from\s+now)?)|(tomorrow|today|on\s+\w+)\s*.*|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?|\s*from\s+now|now)$/i;
             const match = val.match(timeRegex);
             if (match) {
@@ -275,7 +299,6 @@
             }
         }
 
-        // Renamed to avoid recursion with the window property
         function internalDeleteReminder(id) {
             reminderList = reminderList.filter(r => r.id !== id);
         }
@@ -287,7 +310,7 @@
 
             container.innerHTML = reminderList.map(r => {
                 const alertClass = r.isAlerting ? 'reminder-alerting' : '';
-                const timeStr = r.isAlerting ? 'ALERTING! Type dismiss or snooze' : formatTime(r);
+                const timeStr = r.isAlerting ? 'Speak now: Snooze or Dismiss' : formatTime(r);
                 return `
                     <div class="reminder-item ${alertClass}">
                         <div>
@@ -300,46 +323,66 @@
             }).join('');
         }
 
-        setInterval(() => {
-            const now = Date.now();
-            let alerting = false;
-            reminderList.forEach(r => {
-                if (r.targetTime <= now) {
-                    r.isAlerting = true;
-                    alerting = true;
-                }
-            });
-            if (alerting) playAlertSound();
-            render();
-        }, 1000);
-
-        // Interaction
-        document.getElementById('sendButton').onclick = () => handleInput(document.getElementById('commandInput').value);
-        document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
-
-        // Real Voice Recognition
+        // Voice Recognition Singleton
+        let recognition = null;
         if ('webkitSpeechRecognition' in window) {
-            const recognition = new webkitSpeechRecognition();
-            const micBtn = document.getElementById('micButton');
-            const status = document.getElementById('micStatus');
-            
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
             recognition.onstart = () => {
-                micBtn.classList.add('listening');
-                status.textContent = 'Listening...';
+                isListening = true;
+                document.getElementById('micButton').classList.add('listening');
+                document.getElementById('micStatus').textContent = 'Listening...';
             };
             recognition.onend = () => {
-                micBtn.classList.remove('listening');
-                status.textContent = '\u00a0';
+                isListening = false;
+                document.getElementById('micButton').classList.remove('listening');
+                document.getElementById('micStatus').textContent = '\u00a0';
             };
             recognition.onresult = (e) => {
                 const transcript = e.results[0][0].transcript;
                 document.getElementById('commandInput').value = transcript;
                 handleInput(transcript);
             };
-            micBtn.onclick = () => recognition.start();
         }
 
-        // Fixed to prevent recursion
+        function triggerVoice() {
+            if (recognition && !isListening) {
+                try {
+                    recognition.start();
+                } catch(e) {}
+            }
+        }
+
+        // Core Loop
+        setInterval(() => {
+            const now = Date.now();
+            let alertingNow = false;
+            let justStartedAlerting = false;
+
+            reminderList.forEach(r => {
+                if (r.targetTime <= now) {
+                    if (!r.isAlerting) justStartedAlerting = true;
+                    r.isAlerting = true;
+                    alertingNow = true;
+                }
+            });
+
+            if (alertingNow) {
+                playAlertSound();
+                // Automatically activate mic if alert just started or if nothing is being said
+                if (justStartedAlerting || !isListening) {
+                    triggerVoice();
+                }
+            }
+            render();
+        }, 1000);
+
+        document.getElementById('sendButton').onclick = () => handleInput(document.getElementById('commandInput').value);
+        document.getElementById('commandInput').onkeypress = (e) => { if(e.key==='Enter') handleInput(e.target.value); };
+        document.getElementById('micButton').onclick = () => triggerVoice();
+
         window.deleteReminder = (id) => { 
             internalDeleteReminder(id); 
             render(); 
